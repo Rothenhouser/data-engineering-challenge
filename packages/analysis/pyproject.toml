@@ -16,3 +16,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ev_ocpp_analysis"]
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+    "jupytext>=1.16",
+    "plotly>=5.24",
+    "polars>=1.44.2",
+]
