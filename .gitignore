@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# uv
+.uv/
+
+# Generated data + Dagster home
+data/*.parquet
+data/duckdb/
+dagster_home/
+*.tmp
+
+# OS / editor
+.DS_Store
