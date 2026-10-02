@@ -13,8 +13,9 @@ unique per sender+connection, NOT globally — do not use it as a row key.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Iterator
+from typing import Any
 
 # OCPP message type ids
 CALL = 2  # request: [2, id, action, payload]
@@ -156,5 +157,5 @@ def parse_lines(lines: Iterable[str]) -> tuple[list[ParsedEvent], ParseStats]:
 
 
 def iter_file(path: str) -> Iterator[str]:
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         yield from fh
