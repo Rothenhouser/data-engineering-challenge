@@ -1,8 +1,13 @@
 """Parse raw OCPP log lines into structured records.
 
-Each line looks like:
-    chargerN : [MessageTypeId, "messageId", "Action", {payload}]   # Call (2)
-    chargerN : [MessageTypeId, "messageId", {payload}]             # CallResult (3)
+Each line is one OCPP-J message `stationId : [...]`:
+    chargerN : [2, "<UniqueId>", "<Action>", {payload}]              # Call
+    chargerN : [3, "<UniqueId>", {payload}]                          # CallResult
+    chargerN : [4, "<UniqueId>", "<errCode>", "<errDesc>", {detail}] # CallError
+
+arr[0] is the MessageTypeId (2/3/4); arr[1] is the UniqueId, used only to match a
+response to its request (a CallResult reuses its Call's UniqueId). UniqueId is
+unique per sender+connection, NOT globally — do not use it as a row key.
 """
 
 from __future__ import annotations
@@ -14,14 +19,15 @@ from typing import Any, Iterable, Iterator
 # OCPP message type ids
 CALL = 2  # request: [2, id, action, payload]
 CALL_RESULT = 3  # response: [3, id, payload]
+CALL_ERROR = 4  # error response: [4, id, errorCode, errorDescription, details]
 
 
 @dataclass
 class ParsedEvent:
     station_id: str
     msg_type: int
-    message_id: str
-    action: str | None  # None for CallResults
+    unique_id: str  # request-correlation id; unique per sender+connection, not global
+    action: str | None  # None for CallResults/CallErrors
     payload: dict[str, Any]
     # Common fields lifted from the payload when present
     connector_id: int | None = None
@@ -30,6 +36,9 @@ class ParsedEvent:
     # Pivoted MeterValues measurands: measurand -> float value
     measurands: dict[str, float] = field(default_factory=dict)
     meter_context: str | None = None
+    # CallError only
+    error_code: str | None = None
+    error_description: str | None = None
 
 
 @dataclass
@@ -89,26 +98,34 @@ def parse_line(line: str) -> ParsedEvent | None:
         return None
 
     msg_type = arr[0]
-    message_id = str(arr[1])
+    unique_id = str(arr[1])
+    action = None
+    error_code = None
+    error_description = None
 
     if msg_type == CALL and len(arr) >= 4:
         action = arr[2]
         payload = arr[3] if isinstance(arr[3], dict) else {}
     elif msg_type == CALL_RESULT:
-        action = None
         payload = arr[2] if isinstance(arr[2], dict) else {}
+    elif msg_type == CALL_ERROR and len(arr) >= 5:
+        error_code = arr[2]
+        error_description = arr[3]
+        payload = arr[4] if isinstance(arr[4], dict) else {}
     else:
         return None
 
     event = ParsedEvent(
         station_id=station,
         msg_type=msg_type,
-        message_id=message_id,
+        unique_id=unique_id,
         action=action,
         payload=payload,
         connector_id=payload.get("connectorId"),
         transaction_id=payload.get("transactionId"),
         timestamp=payload.get("timestamp") or payload.get("currentTime"),
+        error_code=error_code,
+        error_description=error_description,
     )
 
     if action == "MeterValues":
