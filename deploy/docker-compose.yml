@@ -1,0 +1,89 @@
+# Portable local topology for the OCPP ingestion architecture (Requirement 14).
+#
+# Services:
+#   postgres   - hot raw landing zone (raw_events)
+#   dagster    - host running webserver + daemon serving ev_ocpp_dagster
+#                (historical loader sensor, dump-to-Parquet job, session job)
+#   stream     - standalone ev_ocpp_stream consumer; scale with --scale stream=N
+#   streamlit  - dashboard reading Postgres (live) and Parquet gold (history)
+#
+# The host `data/` directory is bind-mounted at /app/data in every app
+# container as the shared volume: it already holds the input `.txt` files, and
+# the Parquet archive + gold are written back into it (Requirement 14.6).
+
+name: ev-ocpp
+
+x-pg-uri: &pg_uri "postgresql://ocpp:ocpp@postgres:5432/ocpp"
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ocpp
+      POSTGRES_PASSWORD: ocpp
+      POSTGRES_DB: ocpp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocpp"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  dagster:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: >-
+      dagster dev -w /app/deploy/workspace.yaml -h 0.0.0.0 -p 3000
+    environment:
+      OCPP_PG_URI: *pg_uri
+      OCPP_DATA_DIR: /app/data
+      OCPP_ARCHIVE_DIR: /app/data/archive
+      OCPP_GOLD_DIR: /app/data/gold
+      DAGSTER_HOME: /app/dagster_home
+    volumes:
+      - ../data:/app/data
+      - dagster_home:/app/dagster_home
+      - ./workspace.yaml:/app/deploy/workspace.yaml:ro
+      - ./dagster.yaml:/app/dagster_home/dagster.yaml:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  stream:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: >-
+      ev-ocpp-stream --source /app/data/ocpp-data-many-chargers.txt --delay 0.05 --loop
+    environment:
+      OCPP_PG_URI: *pg_uri
+    volumes:
+      - ../data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  streamlit:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: >-
+      ev-ocpp-dashboard --server.address=0.0.0.0 --server.port=8501
+    environment:
+      OCPP_PG_URI: *pg_uri
+      OCPP_GOLD_PATH: /app/data/gold/sessions.parquet
+    volumes:
+      - ../data:/app/data
+    ports:
+      - "8501:8501"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  dagster_home:

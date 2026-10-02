@@ -1,0 +1,3 @@
+# Dagster code location: load the ev_ocpp_dagster Definitions by module.
+load_from:
+  - python_module: ev_ocpp_dagster.definitions

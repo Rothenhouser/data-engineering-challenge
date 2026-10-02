@@ -1,0 +1,13 @@
+.venv/
+**/__pycache__/
+**/*.pyc
+.git/
+.pytest_cache/
+.kiro/
+docs/
+data/archive/
+data/gold/
+data/duckdb/
+dagster_home/
+_run.*
+*.log

@@ -1,0 +1,5 @@
+# Minimal Dagster instance: local on-disk storage under DAGSTER_HOME.
+# Iteration one keeps Dagster's own metadata local (a dedicated metadata
+# Postgres is a documented production evolution, not built here).
+telemetry:
+  enabled: false
