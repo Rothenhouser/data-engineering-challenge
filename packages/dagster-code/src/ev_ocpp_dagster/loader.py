@@ -1,0 +1,80 @@
+"""Historical / batch loader: a directory-scan sensor + loading job.
+
+Models "a charger onboarded with backfilled data". The sensor scans the watched
+directory; a file is new when its filename is not in the Scan_Cursor (the sensor
+cursor), so a re-dropped file under a new name is loaded again by design
+(Requirements 1.2, 2.9). The job parses the file through the shared library and
+bulk-INSERTs raw events into the same append-only ``raw_events`` table the stream
+writes to (Requirements 1.4, 2.8). If Postgres is unreachable the run fails
+visibly in Dagster (Requirement 12.3).
+"""
+
+# NOTE: no `from __future__ import annotations` here — Dagster's Config inference
+# needs the real LoadFileConfig type, not a stringized annotation.
+
+import glob
+import json
+import os
+
+import psycopg
+from dagster import (
+    Config,
+    RunConfig,
+    RunRequest,
+    SensorEvaluationContext,
+    SensorResult,
+    job,
+    op,
+    sensor,
+)
+from ev_ocpp_analysis import init_schema, iter_file, parse_line, to_raw_event_row, write_raw_events
+
+from .config import DATA_DIR, PG_URI
+
+# Only these inputs are treated as historical drops to ingest.
+_INPUT_GLOB = "ocpp-data-*.txt"
+
+
+class LoadFileConfig(Config):
+    path: str
+
+
+@op
+def load_file_op(context, config: LoadFileConfig) -> None:
+    """Parse one historical file and bulk-append its frames to raw_events."""
+    rows, skipped = [], 0
+    for line in iter_file(config.path):
+        event = parse_line(line)
+        if event is None:
+            if line.strip():
+                skipped += 1
+            continue
+        rows.append(to_raw_event_row(event))
+    with psycopg.connect(PG_URI) as conn:  # fails the run if unreachable (12.3)
+        init_schema(conn)
+        written = write_raw_events(conn, rows)
+    context.log.info("loaded %s: ingested=%d skipped=%d", config.path, written, skipped)
+
+
+@job
+def load_file_job() -> None:
+    load_file_op()
+
+
+@sensor(job=load_file_job, minimum_interval_seconds=30)
+def historical_file_sensor(context: SensorEvaluationContext) -> SensorResult:
+    """Request one load run per newly-seen input filename."""
+    seen = set(json.loads(context.cursor) if context.cursor else [])
+    requests = []
+    for path in sorted(glob.glob(os.path.join(DATA_DIR, _INPUT_GLOB))):
+        name = os.path.basename(path)
+        if name in seen:
+            continue
+        seen.add(name)
+        requests.append(
+            RunRequest(
+                run_key=name,
+                run_config=RunConfig(ops={"load_file_op": LoadFileConfig(path=path)}),
+            )
+        )
+    return SensorResult(run_requests=requests, cursor=json.dumps(sorted(seen)))
