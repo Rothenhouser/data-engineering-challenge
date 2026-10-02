@@ -1,4 +1,4 @@
-"""Core OCPP analysis: parsing, session reconstruction, DuckDB queries."""
+"""Core OCPP analysis: parsing, session reconstruction, readers, persistence."""
 
 from __future__ import annotations
 
@@ -12,7 +12,14 @@ from .parsing import (
     parse_line,
     parse_lines,
 )
+from .pg import CREATE_TABLE_SQL, init_schema, write_raw_event, write_raw_events
 from .raw_event import RAW_EVENT_FIELDS, to_raw_event_row
+from .readers import (
+    read_archive_duckdb,
+    read_latest_per_station_postgres,
+    read_recent_window_postgres,
+)
+from .sessionization import SESSION_COLUMNS, reconstruct_sessions
 
 __all__ = [
     "CALL",
@@ -25,4 +32,13 @@ __all__ = [
     "parse_lines",
     "RAW_EVENT_FIELDS",
     "to_raw_event_row",
+    "reconstruct_sessions",
+    "SESSION_COLUMNS",
+    "read_archive_duckdb",
+    "read_recent_window_postgres",
+    "read_latest_per_station_postgres",
+    "CREATE_TABLE_SQL",
+    "init_schema",
+    "write_raw_event",
+    "write_raw_events",
 ]

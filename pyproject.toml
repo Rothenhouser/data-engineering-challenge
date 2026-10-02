@@ -11,11 +11,28 @@ members = ["packages/*"]
 [tool.uv.sources]
 ev-ocpp-analysis = { workspace = true }
 ev-ocpp-dagster = { workspace = true }
+ev-ocpp-stream = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "poethepoet>=0.30",
     "pytest>=8.0",
+    "ruff>=0.16.10",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["packages"]
+
+[tool.poe.tasks]
+sync = "uv sync --all-packages --all-groups"
+lint = "ruff check packages"
+fmt = "ruff format packages"
+test = "pytest"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+extend-exclude = ["**/notebooks/**"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "FURB"]

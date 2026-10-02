@@ -10,9 +10,16 @@ __pycache__/
 
 # Generated data + Dagster home
 data/*.parquet
+data/archive/
+data/gold/
 data/duckdb/
 dagster_home/
 *.tmp
+
+# scratch run logs/scripts
+_run.*
+_sync*.log
+_sync_done.txt
 
 # OS / editor
 .DS_Store

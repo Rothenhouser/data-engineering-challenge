@@ -1,12 +1,14 @@
 [project]
 name = "ev-ocpp-analysis"
 version = "0.1.0"
-description = "OCPP parsing, session reconstruction, and DuckDB query layer"
+description = "OCPP parsing, session reconstruction, and DuckDB/Postgres read layer"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "duckdb>=1.1",
-    "pandas>=2.2",
+    "polars>=1.44",
+    "connectorx>=0.4",
+    "psycopg[binary]>=3.2",
     "pyarrow>=18.0",
 ]
 
@@ -22,5 +24,4 @@ dev = [
     "jupyter>=1.1.1",
     "jupytext>=1.16",
     "plotly>=5.24",
-    "polars>=1.44.2",
 ]
