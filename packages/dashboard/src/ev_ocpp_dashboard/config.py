@@ -10,6 +10,10 @@ GOLD_PATH = os.environ.get("OCPP_GOLD_PATH", "data/gold/sessions.parquet")
 GOLD_READINGS_PATH = os.environ.get(
     "OCPP_GOLD_READINGS_PATH", "data/gold/session_readings.parquet"
 )
+# Daily per-charger analytics (gold).
+GOLD_ANALYTICS_PATH = os.environ.get(
+    "OCPP_GOLD_ANALYTICS_PATH", "data/gold/analytics_daily.parquet"
+)
 # Cold Parquet archive directory (one immutable file per dump).
 ARCHIVE_DIR = os.environ.get("OCPP_ARCHIVE_DIR", "data/archive")
 # How far back the in-flight live window reaches, in minutes.
