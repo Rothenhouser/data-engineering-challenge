@@ -21,6 +21,12 @@ from .readers import (
     read_recent_window_postgres,
 )
 from .sessionization import SESSION_COLUMNS, reconstruct_sessions
+from .sim_control import (
+    CREATE_SIM_CONTROL_SQL,
+    init_sim_control,
+    read_sim_control,
+    write_sim_control,
+)
 
 __all__ = [
     "CALL",
@@ -43,4 +49,8 @@ __all__ = [
     "init_schema",
     "write_raw_event",
     "write_raw_events",
+    "CREATE_SIM_CONTROL_SQL",
+    "init_sim_control",
+    "read_sim_control",
+    "write_sim_control",
 ]
