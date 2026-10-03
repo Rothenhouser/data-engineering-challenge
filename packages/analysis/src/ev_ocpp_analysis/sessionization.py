@@ -52,7 +52,7 @@ READING_COLUMNS = (
 READING_SCHEMA = {
     "session_id": pl.Utf8,
     "station_id": pl.Utf8,
-    "timestamp": pl.Datetime,
+    "timestamp": pl.Datetime(time_zone="UTC"),
     "power_kw": pl.Float64,
     "soc_pct": pl.Float64,
     "energy_register_kwh": pl.Float64,
@@ -290,8 +290,12 @@ def reconstruct_sessions_and_readings(
         "site_id": pl.Utf8,
         "connector_id": pl.Int64,
         "status": pl.Utf8,
-        "start_time": pl.Datetime,
-        "end_time": pl.Datetime,
+        # Boundaries are tz-aware UTC: the fold works with UTC-aware datetimes
+        # (see _coerce_ts), so pin the dtype to UTC rather than letting frame
+        # construction strip the tz to naive — otherwise downstream comparisons
+        # against tz-aware bounds raise a Polars supertype error.
+        "start_time": pl.Datetime(time_zone="UTC"),
+        "end_time": pl.Datetime(time_zone="UTC"),
         "duration": pl.Float64,
         "total_energy_kwh": pl.Float64,
         "avg_power": pl.Float64,

@@ -131,7 +131,7 @@ def _charger_overview(window_minutes: int) -> pl.DataFrame:
             schema={
                 "station_id": pl.Utf8,
                 "in_session": pl.Boolean,
-                "session_start": pl.Datetime,
+                "session_start": pl.Datetime(time_zone="UTC"),
                 "energy_kwh_so_far": pl.Float64,
             }
         )
@@ -151,13 +151,9 @@ def _charger_overview(window_minutes: int) -> pl.DataFrame:
     )
     # Running session minutes for in-session chargers.
     if "session_start" in overview.columns:
-        # session_start comes out of the fold tz-naive (UTC-in-meaning), while
-        # `now` is tz-aware UTC; subtracting the two directly raises a supertype
-        # error. Drop the tzinfo from `now` so both sides are naive-UTC.
-        now_naive = now.replace(tzinfo=None)
         overview = overview.with_columns(
             pl.when(pl.col("in_session"))
-            .then((pl.lit(now_naive) - pl.col("session_start")).dt.total_seconds() / 60.0)
+            .then((pl.lit(now) - pl.col("session_start")).dt.total_seconds() / 60.0)
             .otherwise(None)
             .round(1)
             .alias("session_minutes")
