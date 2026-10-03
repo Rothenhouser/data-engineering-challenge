@@ -51,7 +51,10 @@ def dump_to_parquet_op(context) -> None:
     _write_watermark(new_watermark)
     context.log.info(
         "dump: wrote %d rows to %s, watermark %d -> %d",
-        df.height, out, watermark, new_watermark,
+        df.height,
+        out,
+        watermark,
+        new_watermark,
     )
 
 

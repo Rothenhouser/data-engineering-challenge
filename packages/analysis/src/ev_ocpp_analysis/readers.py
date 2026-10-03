@@ -28,6 +28,7 @@ def _parse_payloads(df: pl.DataFrame) -> pl.DataFrame:
 
 # --- Historical reader: Parquet archive via DuckDB -------------------------
 
+
 def read_archive_duckdb(parquet_glob: str, predicate: str | None = None) -> pl.DataFrame:
     """Read raw events from the Parquet archive via a DuckDB scan.
 
@@ -51,6 +52,7 @@ def read_archive_duckdb(parquet_glob: str, predicate: str | None = None) -> pl.D
 
 
 # --- Live reader: Postgres via ConnectorX ----------------------------------
+
 
 def read_recent_window_postgres(conn_uri: str, since: datetime) -> pl.DataFrame:
     """Read the bounded recent window of raw events from Postgres (ConnectorX).

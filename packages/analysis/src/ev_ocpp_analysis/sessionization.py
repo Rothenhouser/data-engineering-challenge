@@ -71,7 +71,7 @@ def _power_sample(payload: dict[str, Any]) -> float | None:
             if sv.get("measurand") == "Power.Active.Import":
                 try:
                     return float(sv["value"])
-                except (KeyError, TypeError, ValueError):
+                except KeyError, TypeError, ValueError:
                     return None
     return None
 
@@ -209,10 +209,18 @@ def reconstruct_sessions(
 
     if not done:
         schema = {
-            "session_id": pl.Utf8, "station_id": pl.Utf8, "connector_id": pl.Int64,
-            "status": pl.Utf8, "start_time": pl.Datetime, "end_time": pl.Datetime,
-            "duration": pl.Float64, "total_energy_kwh": pl.Float64, "avg_power": pl.Float64,
-            "peak_power": pl.Float64, "event_count": pl.Int64, "stop_reason": pl.Utf8,
+            "session_id": pl.Utf8,
+            "station_id": pl.Utf8,
+            "connector_id": pl.Int64,
+            "status": pl.Utf8,
+            "start_time": pl.Datetime,
+            "end_time": pl.Datetime,
+            "duration": pl.Float64,
+            "total_energy_kwh": pl.Float64,
+            "avg_power": pl.Float64,
+            "peak_power": pl.Float64,
+            "event_count": pl.Int64,
+            "stop_reason": pl.Utf8,
         }
         return pl.DataFrame(schema=schema)
     return pl.DataFrame(done).select(SESSION_COLUMNS)
