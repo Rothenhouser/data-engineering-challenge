@@ -1,20 +1,29 @@
-"""Dump-to-Parquet job: archive new landing rows to the cold store.
+"""Dump-to-Parquet asset: archive new landing rows to the cold store.
 
-Reads the not-yet-archived slice (``event_id`` > Watermark_Cursor) from Postgres,
-appends it as a new immutable Parquet file to the Cold_Archive, then advances the
+The archive is modelled as a single Dagster asset. Materializing it reads the
+not-yet-archived slice (``event_id`` > Watermark_Cursor) from Postgres, appends
+it as a new immutable Parquet file to the Cold_Archive, then advances the
 watermark to the greatest ``event_id`` in that slice (Requirements 3.1-3.3). Rows
 are archived before retention can drop them (3.4); archived files are never
 updated in place (3.6). A re-run from the same watermark reproduces the same
 files via the duplicate-tolerant fold downstream (12.4).
+
+NOTE: this asset is intentionally unpartitioned for now. Daily partitioning is
+still open: a day partition could mean "events whose OCPP payload time falls on
+that day" (but not every frame is timestamped, and facts can arrive late) or
+"rows ingested during that day" (more robust, but harder to reconcile and
+entangled with simulated wall-clock time). Until that is settled, the asset
+archives all currently-available data.
 """
 
-from __future__ import annotations
+# NOTE: no `from __future__ import annotations` here — Dagster validates the real
+# AssetExecutionContext type hint on the asset fn, not a stringized annotation.
 
 import os
 from datetime import UTC, datetime
 
 import polars as pl
-from dagster import job, op
+from dagster import AssetExecutionContext, asset
 
 from .config import ARCHIVE_DIR, PG_URI, WATERMARK_PATH
 
@@ -31,8 +40,13 @@ def _write_watermark(value: int) -> None:
         fh.write(str(value))
 
 
-@op
-def dump_to_parquet_op(context) -> None:
+@asset(
+    group_name="archive",
+    description="Immutable Parquet archive of raw OCPP events. Appends the "
+    "slice above the event_id watermark as a new file on each materialization.",
+)
+def raw_events_archive(context: AssetExecutionContext) -> None:
+    """Append the not-yet-archived slice of ``raw_events`` to the Cold_Archive."""
     watermark = _read_watermark()
     query = (
         "SELECT event_id, station_id, msg_type, unique_id, action, "
@@ -41,7 +55,7 @@ def dump_to_parquet_op(context) -> None:
     )
     df = pl.read_database_uri(query, PG_URI, engine="connectorx")
     if df.is_empty():
-        context.log.info("dump: no new rows above watermark=%d", watermark)
+        context.log.info("archive: no new rows above watermark=%d", watermark)
         return
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
@@ -50,14 +64,9 @@ def dump_to_parquet_op(context) -> None:
     new_watermark = int(df["event_id"].max())
     _write_watermark(new_watermark)
     context.log.info(
-        "dump: wrote %d rows to %s, watermark %d -> %d",
+        "archive: wrote %d rows to %s, watermark %d -> %d",
         df.height,
         out,
         watermark,
         new_watermark,
     )
-
-
-@job
-def dump_to_parquet_job() -> None:
-    dump_to_parquet_op()
