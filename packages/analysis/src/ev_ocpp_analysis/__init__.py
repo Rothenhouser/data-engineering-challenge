@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .analytics import DAILY_COLUMNS, compute_daily_stats
 from .measurands import Measurand, read_measurand
 from .parsing import (
     CALL,
@@ -47,6 +48,8 @@ __all__ = [
     "to_raw_event_row",
     "Measurand",
     "read_measurand",
+    "compute_daily_stats",
+    "DAILY_COLUMNS",
     "reconstruct_sessions",
     "reconstruct_sessions_and_readings",
     "SESSION_COLUMNS",
