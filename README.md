@@ -49,7 +49,11 @@ Local dashboard dev (hot reload) against the containerized Postgres:
   until a StopTransaction closes the session.
 - **Live clock**: the feed replays historical timestamps, so live views derive
   "now" from the newest payload time (toggleable on the Simulation page).
+- **Sites**: sessions and daily analytics carry a nullable `site_id`, populated
+  from an optional `station_id -> site_id` map (`OCPP_SITE_MAP` env, JSON); unset
+  means `None`. Ready for multi-site rollups.
+- **Tests**: property-based tests (hypothesis) cover the fold's correctness
+  properties — duplicate tolerance, energy derivation, status totality, and
+  determinism — plus daily-analytics fault reconciliation. Run with `uv run poe test`.
 - **Deferred for production** (see design doc): object-store Parquet, partitioned
-  archive, managed Postgres, separate Dagster metadata DB, source-level dedup,
-  automated tests (property tests are specified but not yet implemented), and a
-  `site_id` dimension for multi-site rollups.
+  archive, managed Postgres, separate Dagster metadata DB, and source-level dedup.
