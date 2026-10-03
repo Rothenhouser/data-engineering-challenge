@@ -24,8 +24,10 @@ from dataclasses import dataclass
 import psycopg
 from ev_ocpp_analysis import (
     init_schema,
+    init_sim_control,
     iter_file,
     parse_line,
+    read_sim_control,
     to_raw_event_row,
     write_raw_event,
 )
@@ -57,7 +59,10 @@ def run_stream_consumer(
     stats = StreamStats()
     conn = _reconnect(None, conn_uri)
     init_schema(conn)
-    log.info("stream consumer started: source=%s", source_path)
+    init_sim_control(conn)
+    # Live-adjustable inter-frame delay; refreshed from sim_control periodically.
+    cur_delay = _refresh_delay(conn, delay)
+    log.info("stream consumer started: source=%s delay=%.3fs", source_path, cur_delay)
     try:
         for line in iter_file(source_path):
             event = parse_line(line)
@@ -75,15 +80,27 @@ def run_stream_consumer(
                     log.error("raw_events write failed, retrying: %s", exc)
                     time.sleep(retry_wait)
                     conn = _reconnect(conn, conn_uri)
-            # Periodic heartbeat so an always-on run is visibly alive in logs.
+            # Every 100 frames: heartbeat + re-read the live-adjustable delay.
             if stats.ingested % 100 == 0:
-                log.info("ingested=%d skipped=%d", stats.ingested, stats.skipped)
-            if delay:
-                time.sleep(delay)
+                cur_delay = _refresh_delay(conn, delay)
+                log.info(
+                    "ingested=%d skipped=%d delay=%.3fs",
+                    stats.ingested, stats.skipped, cur_delay,
+                )
+            if cur_delay:
+                time.sleep(cur_delay)
     finally:
         conn.close()
     log.info("stream run done: ingested=%d skipped=%d", stats.ingested, stats.skipped)
     return stats
+
+
+def _refresh_delay(conn: psycopg.Connection, fallback: float) -> float:
+    """Read the current stream delay from sim_control, falling back on error."""
+    try:
+        return float(read_sim_control(conn).get("stream_delay", fallback))
+    except psycopg.Error:
+        return fallback
 
 
 def _reconnect(conn: psycopg.Connection | None, conn_uri: str) -> psycopg.Connection:
