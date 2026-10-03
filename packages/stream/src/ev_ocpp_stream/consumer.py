@@ -55,8 +55,9 @@ def run_stream_consumer(
     error reconnects and retries the same frame instead of dropping it.
     """
     stats = StreamStats()
-    conn = psycopg.connect(conn_uri)
+    conn = _reconnect(None, conn_uri)
     init_schema(conn)
+    log.info("stream consumer started: source=%s", source_path)
     try:
         for line in iter_file(source_path):
             event = parse_line(line)
@@ -74,6 +75,9 @@ def run_stream_consumer(
                     log.error("raw_events write failed, retrying: %s", exc)
                     time.sleep(retry_wait)
                     conn = _reconnect(conn, conn_uri)
+            # Periodic heartbeat so an always-on run is visibly alive in logs.
+            if stats.ingested % 500 == 0:
+                log.info("ingested=%d skipped=%d", stats.ingested, stats.skipped)
             if delay:
                 time.sleep(delay)
     finally:
@@ -82,16 +86,24 @@ def run_stream_consumer(
     return stats
 
 
-def _reconnect(conn: psycopg.Connection, conn_uri: str) -> psycopg.Connection:
-    try:
-        conn.close()
-    except psycopg.Error:
-        pass
+def _reconnect(conn: psycopg.Connection | None, conn_uri: str) -> psycopg.Connection:
+    """(Re)connect to Postgres, retrying until it succeeds.
+
+    A ``connect_timeout`` is set so a stalled connect (e.g. Postgres restarting)
+    fails fast and the loop can retry+log, rather than blocking indefinitely.
+    """
+    if conn is not None:
+        try:
+            conn.close()
+        except psycopg.Error:
+            pass
+    attempt = 0
     while True:
         try:
-            return psycopg.connect(conn_uri)
+            return psycopg.connect(conn_uri, connect_timeout=5)
         except psycopg.Error as exc:
-            log.error("reconnect failed, retrying: %s", exc)
+            attempt += 1
+            log.error("connect failed (attempt %d), retrying: %s", attempt, exc)
             time.sleep(2.0)
 
 
