@@ -125,7 +125,7 @@ def main() -> None:
         if auto:
             # Rerun the whole script on a timer; the cached readers (ttl=5s)
             # keep it cheap, so live views stay current without manual reload.
-            st_autorefresh(interval_ms=every * 1000, key="auto_refresh")
+            st_autorefresh(interval=every * 1000, key="auto_refresh")
 
     live_f = _apply_filters(live, picked, start, end, "ingest_ts")
     gold_f = _apply_filters(gold, picked, start, end, "start_time")
