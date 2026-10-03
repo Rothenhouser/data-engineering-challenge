@@ -22,6 +22,8 @@ services:
       POSTGRES_USER: ocpp
       POSTGRES_PASSWORD: ocpp
       POSTGRES_DB: ocpp
+    ports:
+      - "5432:5432"  # publish to host so a DB browser can connect to localhost:5432
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -76,6 +78,7 @@ services:
     environment:
       OCPP_PG_URI: *pg_uri
       OCPP_GOLD_PATH: /app/data/gold/sessions.parquet
+      OCPP_ARCHIVE_DIR: /app/data/archive
     volumes:
       - ../data:/app/data
     ports:
