@@ -76,7 +76,7 @@ def run_stream_consumer(
                     time.sleep(retry_wait)
                     conn = _reconnect(conn, conn_uri)
             # Periodic heartbeat so an always-on run is visibly alive in logs.
-            if stats.ingested % 500 == 0:
+            if stats.ingested % 100 == 0:
                 log.info("ingested=%d skipped=%d", stats.ingested, stats.skipped)
             if delay:
                 time.sleep(delay)
