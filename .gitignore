@@ -24,3 +24,6 @@ _sync_done.txt
 # OS / editor
 .DS_Store
 .vscode/
+
+# Streamlit dataframe CSV exports
+*_export.csv

@@ -60,7 +60,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     command: >-
-      ev-ocpp-stream --source /app/data/ocpp-data-many-chargers.txt --delay 1.0 --loop
+      ev-ocpp-stream --source /app/data/ocpp-data-many-chargers.txt --delay 0.5 --loop
     environment:
       OCPP_PG_URI: *pg_uri
     volumes:
