@@ -55,11 +55,20 @@ def connect(catalog_path: str, data_path: str) -> Iterator[duckdb.DuckDBPyConnec
     os.makedirs(os.path.dirname(catalog_path) or ".", exist_ok=True)
     os.makedirs(data_path, exist_ok=True)
 
+    # DuckLake pins the data path in the catalog at creation and rejects a later
+    # attach whose DATA_PATH differs. The same catalog file is reached from
+    # different cwds (a host run vs. the container's /app bind mount), so a stored
+    # absolute path can never match both. OVERRIDE_DATA_PATH tells DuckLake to use
+    # the DATA_PATH supplied now instead of the stored one, making the catalog
+    # portable across environments. The trailing separator keeps it a directory.
+    data_path = os.path.join(data_path, "")
+
     con = duckdb.connect()
     try:
         con.execute("INSTALL ducklake; LOAD ducklake;")
         con.execute(
-            f"ATTACH 'ducklake:{catalog_path}' AS {CATALOG_ALIAS} (DATA_PATH ?)",
+            f"ATTACH 'ducklake:{catalog_path}' AS {CATALOG_ALIAS} "
+            "(DATA_PATH ?, OVERRIDE_DATA_PATH TRUE)",
             [data_path],
         )
         yield con

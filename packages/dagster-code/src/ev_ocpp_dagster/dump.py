@@ -21,12 +21,15 @@ archives all currently-available data.
 # NOTE: no `from __future__ import annotations` here — Dagster validates the real
 # AssetExecutionContext type hint on the asset fn, not a stringized annotation.
 
-import duckdb
 import polars as pl
 from dagster import AssetExecutionContext, asset
 from ev_ocpp_analysis import ARCHIVE_TABLE, append_frame, connect
 
 from .config import LAKE_CATALOG, LAKE_DATA, PG_URI
+
+# Unqualified name of the archive table within the DuckLake catalog, used to
+# check existence before querying it.
+_ARCHIVE_TABLE_NAME = ARCHIVE_TABLE.rsplit(".", 1)[-1]
 
 
 @asset(
@@ -37,11 +40,20 @@ from .config import LAKE_CATALOG, LAKE_DATA, PG_URI
 def raw_events_archive(context: AssetExecutionContext) -> None:
     """Append the not-yet-archived slice of ``raw_events`` to the Cold_Archive."""
     with connect(LAKE_CATALOG, LAKE_DATA) as con:
-        try:
+        # Derive the watermark from the catalog. On the first run the archive
+        # table does not exist yet; querying it would make DuckDB attempt a
+        # replacement scan (finding the asset's own Python global of the same
+        # name) rather than raise a catalog error, so check existence explicitly
+        # instead of catching an exception.
+        exists = con.execute(
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_catalog = 'lake' AND table_name = ? LIMIT 1",
+            [_ARCHIVE_TABLE_NAME],
+        ).fetchone()
+        if exists:
             row = con.execute(f"SELECT max(event_id) FROM {ARCHIVE_TABLE}").fetchone()
             watermark = int(row[0]) if row and row[0] is not None else 0
-        except duckdb.CatalogException:
-            # Table not created yet (first run) — start from the beginning.
+        else:
             watermark = 0
 
         query = (
