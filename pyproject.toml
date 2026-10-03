@@ -25,9 +25,12 @@ testpaths = ["packages"]
 
 [tool.poe.tasks]
 sync = "uv sync --all-packages --all-groups"
-lint = "ruff check packages"
-fmt = "ruff format packages"
 test = "pytest"
+
+# Format first, then lint with autofix. `poe lint` runs both in order.
+lint = ["_fmt", "_lint_fix"]
+_fmt = "ruff format ."
+_lint_fix = "ruff check --fix ."
 
 [tool.ruff]
 target-version = "py314"
