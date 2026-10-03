@@ -18,4 +18,5 @@ GOLD_DIR = os.environ.get("OCPP_GOLD_DIR", "data/gold")  # Parquet session facts
 
 ARCHIVE_GLOB = os.path.join(ARCHIVE_DIR, "*.parquet")
 GOLD_PATH = os.path.join(GOLD_DIR, "sessions.parquet")
+GOLD_READINGS_PATH = os.path.join(GOLD_DIR, "session_readings.parquet")
 WATERMARK_PATH = os.path.join(ARCHIVE_DIR, "_watermark.txt")
