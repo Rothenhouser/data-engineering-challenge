@@ -21,7 +21,12 @@ from .readers import (
     read_latest_per_station_postgres,
     read_recent_window_postgres,
 )
-from .sessionization import SESSION_COLUMNS, reconstruct_sessions
+from .sessionization import (
+    READING_COLUMNS,
+    SESSION_COLUMNS,
+    reconstruct_sessions,
+    reconstruct_sessions_and_readings,
+)
 from .sim_control import (
     CREATE_SIM_CONTROL_SQL,
     init_sim_control,
@@ -43,7 +48,9 @@ __all__ = [
     "Measurand",
     "read_measurand",
     "reconstruct_sessions",
+    "reconstruct_sessions_and_readings",
     "SESSION_COLUMNS",
+    "READING_COLUMNS",
     "read_archive_duckdb",
     "read_recent_window_postgres",
     "read_latest_per_station_postgres",

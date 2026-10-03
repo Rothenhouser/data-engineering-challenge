@@ -38,6 +38,23 @@ SESSION_COLUMNS = (
     "event_count",
     "stop_reason",
 )
+# Per-session time-series readings (the charging curve), one row per MeterValues.
+READING_COLUMNS = (
+    "session_id",
+    "station_id",
+    "timestamp",
+    "power_kw",
+    "soc_pct",
+    "energy_register_kwh",
+)
+READING_SCHEMA = {
+    "session_id": pl.Utf8,
+    "station_id": pl.Utf8,
+    "timestamp": pl.Datetime,
+    "power_kw": pl.Float64,
+    "soc_pct": pl.Float64,
+    "energy_register_kwh": pl.Float64,
+}
 # Default bounded recent window: open sessions newer than this are "active".
 DEFAULT_ACTIVE_WINDOW_SECONDS = 3600.0
 
@@ -64,6 +81,15 @@ def _coerce_ts(value: Any) -> datetime | None:
 def _payload_time(payload: dict[str, Any]) -> datetime | None:
     """The event's own timestamp from the payload, if any (used for boundaries)."""
     return _coerce_ts(payload.get("timestamp") or payload.get("currentTime"))
+
+
+def _metervalue_time(payload: dict[str, Any]) -> datetime | None:
+    """The sample timestamp of a MeterValues frame (nested under meterValue[])."""
+    for mv in payload.get("meterValue") or []:
+        t = _coerce_ts(mv.get("timestamp"))
+        if t is not None:
+            return t
+    return None
 
 
 def _power_sample(payload: dict[str, Any]) -> float | None:
@@ -108,7 +134,25 @@ def reconstruct_sessions(
     now: datetime | None = None,
     active_window_seconds: float = DEFAULT_ACTIVE_WINDOW_SECONDS,
 ) -> pl.DataFrame:
-    """Reconstruct charging sessions from a raw-event frame.
+    """Reconstruct charging-session facts from a raw-event frame.
+
+    Thin wrapper over :func:`reconstruct_sessions_and_readings` returning only the
+    session facts (unchanged contract for existing callers).
+    """
+    return reconstruct_sessions_and_readings(events, now, active_window_seconds)[0]
+
+
+def reconstruct_sessions_and_readings(
+    events: pl.DataFrame,
+    now: datetime | None = None,
+    active_window_seconds: float = DEFAULT_ACTIVE_WINDOW_SECONDS,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Reconstruct sessions *and* their per-session time-series readings.
+
+    Returns ``(sessions, readings)``. ``readings`` has one row per MeterValues
+    sample for an open session (the charging curve): ``session_id``,
+    ``station_id``, ``timestamp``, ``power_kw``, ``soc_pct``,
+    ``energy_register_kwh``. Each reading links to its session by ``session_id``.
 
     Opens a session on StartTransaction, accumulates Power.Active.Import samples
     from MeterValues while open, and closes on StopTransaction. Sessions are keyed
@@ -128,6 +172,11 @@ def reconstruct_sessions(
     uid_to_connector: dict[tuple[str, str], Any] = {}  # (station, unique_id) -> connector
     txn_to_connector: dict[tuple[str, Any], Any] = {}  # (station, transactionId) -> connector
 
+    readings: list[dict[str, Any]] = []  # per-session charging-curve samples
+
+    def _session_id(station: Any, connector: Any, start: datetime) -> str:
+        return f"{station}|{connector}|{start.isoformat()}"
+
     def finalize(s: dict[str, Any], end: datetime | None, reason: str | None) -> dict[str, Any]:
         start = s["start_time"]
         close = end or now
@@ -144,7 +193,7 @@ def reconstruct_sessions(
         else:
             status = "incomplete"
         return {
-            "session_id": f"{s['station_id']}|{s['connector_id']}|{start.isoformat()}",
+            "session_id": s["session_id"],
             "station_id": s["station_id"],
             "connector_id": s["connector_id"],
             "status": status,
@@ -170,6 +219,7 @@ def reconstruct_sessions(
             if key in open_sessions:
                 done.append(finalize(open_sessions.pop(key), None, None))
             open_sessions[key] = {
+                "session_id": _session_id(station, connector, r["_time"]),
                 "station_id": station,
                 "connector_id": connector,
                 "start_time": r["_time"],
@@ -197,25 +247,45 @@ def reconstruct_sessions(
                 p = _power_sample(payload)
                 if p is not None:
                     s["powers"].append(p)
+                # Record the charging-curve sample linked to this session,
+                # timestamped by the MeterValues sample time where present.
+                readings.append(
+                    {
+                        "session_id": s["session_id"],
+                        "station_id": station,
+                        "timestamp": _metervalue_time(payload) or r["_time"],
+                        "power_kw": p,
+                        "soc_pct": read_measurand(payload, Measurand.SOC),
+                        "energy_register_kwh": read_measurand(payload, Measurand.ENERGY_REGISTER),
+                    }
+                )
 
     # Any still-open sessions are active/incomplete.
     for s in open_sessions.values():
         done.append(finalize(s, None, None))
 
-    if not done:
-        schema = {
-            "session_id": pl.Utf8,
-            "station_id": pl.Utf8,
-            "connector_id": pl.Int64,
-            "status": pl.Utf8,
-            "start_time": pl.Datetime,
-            "end_time": pl.Datetime,
-            "duration": pl.Float64,
-            "total_energy_kwh": pl.Float64,
-            "avg_power": pl.Float64,
-            "peak_power": pl.Float64,
-            "event_count": pl.Int64,
-            "stop_reason": pl.Utf8,
-        }
-        return pl.DataFrame(schema=schema)
-    return pl.DataFrame(done).select(SESSION_COLUMNS)
+    sessions_schema = {
+        "session_id": pl.Utf8,
+        "station_id": pl.Utf8,
+        "connector_id": pl.Int64,
+        "status": pl.Utf8,
+        "start_time": pl.Datetime,
+        "end_time": pl.Datetime,
+        "duration": pl.Float64,
+        "total_energy_kwh": pl.Float64,
+        "avg_power": pl.Float64,
+        "peak_power": pl.Float64,
+        "event_count": pl.Int64,
+        "stop_reason": pl.Utf8,
+    }
+    sessions = (
+        pl.DataFrame(done).select(SESSION_COLUMNS)
+        if done
+        else pl.DataFrame(schema=sessions_schema)
+    )
+    readings_df = (
+        pl.DataFrame(readings, schema_overrides=READING_SCHEMA).select(READING_COLUMNS)
+        if readings
+        else pl.DataFrame(schema=READING_SCHEMA)
+    )
+    return sessions, readings_df
