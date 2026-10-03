@@ -17,6 +17,8 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from .measurands import Measurand
+
 # OCPP message type ids
 CALL = 2  # request: [2, id, action, payload]
 CALL_RESULT = 3  # response: [3, id, payload]
@@ -73,11 +75,11 @@ def _pivot_meter_values(payload: dict[str, Any]) -> tuple[dict[str, float], str 
     first = meter_values[0]
     ts = first.get("timestamp")
     for sv in first.get("sampledValue", []):
-        name = sv.get("measurand", "Energy.Active.Import.Register")
+        name = sv.get("measurand", Measurand.ENERGY_REGISTER.value)
         context = context or sv.get("context")
         try:
             measurands[name] = float(sv["value"])
-        except KeyError, TypeError, ValueError:
+        except (KeyError, TypeError, ValueError):
             continue
     return measurands, ts, context
 

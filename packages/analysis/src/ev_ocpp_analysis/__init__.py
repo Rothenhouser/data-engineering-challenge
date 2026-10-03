@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .measurands import Measurand, read_measurand
 from .parsing import (
     CALL,
     CALL_ERROR,
@@ -39,6 +40,8 @@ __all__ = [
     "parse_lines",
     "RAW_EVENT_FIELDS",
     "to_raw_event_row",
+    "Measurand",
+    "read_measurand",
     "reconstruct_sessions",
     "SESSION_COLUMNS",
     "read_archive_duckdb",

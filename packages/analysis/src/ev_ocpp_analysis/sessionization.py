@@ -20,6 +20,8 @@ from typing import Any
 
 import polars as pl
 
+from .measurands import Measurand, read_measurand
+
 # Columns a raw-event frame must carry for the fold (the RawEvent shape).
 RAW_COLUMNS = ("station_id", "msg_type", "unique_id", "action", "payload", "ingest_ts")
 SESSION_COLUMNS = (
@@ -66,14 +68,7 @@ def _payload_time(payload: dict[str, Any]) -> datetime | None:
 
 def _power_sample(payload: dict[str, Any]) -> float | None:
     """Pull the Power.Active.Import sample from a MeterValues payload."""
-    for mv in payload.get("meterValue") or []:
-        for sv in mv.get("sampledValue") or []:
-            if sv.get("measurand") == "Power.Active.Import":
-                try:
-                    return float(sv["value"])
-                except KeyError, TypeError, ValueError:
-                    return None
-    return None
+    return read_measurand(payload, Measurand.POWER_ACTIVE_IMPORT)
 
 
 def _dedup(events: pl.DataFrame) -> list[dict[str, Any]]:
