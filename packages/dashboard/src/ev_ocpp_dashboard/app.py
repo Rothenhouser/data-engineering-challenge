@@ -43,9 +43,13 @@ def _measurand(payload: dict[str, Any], name: str) -> float | None:
     return None
 
 
-@st.cache_data(ttl=5)
 def _recent_window(window_minutes: int) -> pl.DataFrame:
-    """Read the bounded recent Postgres window once; shared by the live views."""
+    """Read the bounded recent Postgres window once; shared by the live views.
+
+    Not cached: the frame carries a dict-valued ``payload`` (Polars Object dtype)
+    that cannot be pickled by st.cache_data. Its only caller (_charger_overview)
+    is cached and returns plain-typed columns, so the DB read is still deduped.
+    """
     since = datetime.now(UTC) - timedelta(minutes=window_minutes)
     return read_recent_window_postgres(PG_URI, since)
 
