@@ -56,9 +56,7 @@ def write_sim_control(
     """Update whichever controls are provided (one-row upsert)."""
     init_sim_control(conn)
     if stream_delay is not None:
-        conn.execute(
-            "UPDATE sim_control SET stream_delay = %s WHERE id = 1", (stream_delay,)
-        )
+        conn.execute("UPDATE sim_control SET stream_delay = %s WHERE id = 1", (stream_delay,))
     if clock_mode is not None:
         conn.execute("UPDATE sim_control SET clock_mode = %s WHERE id = 1", (clock_mode,))
     conn.commit()

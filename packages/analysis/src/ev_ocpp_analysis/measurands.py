@@ -37,6 +37,6 @@ def read_measurand(payload: dict[str, Any], measurand: Measurand) -> float | Non
             if sv.get("measurand") == measurand.value:
                 try:
                     return float(sv["value"])
-                except (KeyError, TypeError, ValueError):
+                except KeyError, TypeError, ValueError:
                     return None
     return None

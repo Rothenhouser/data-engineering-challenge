@@ -79,7 +79,7 @@ def _pivot_meter_values(payload: dict[str, Any]) -> tuple[dict[str, float], str 
         context = context or sv.get("context")
         try:
             measurands[name] = float(sv["value"])
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             continue
     return measurands, ts, context
 

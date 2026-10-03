@@ -85,7 +85,9 @@ def run_stream_consumer(
                 cur_delay = _refresh_delay(conn, delay)
                 log.info(
                     "ingested=%d skipped=%d delay=%.3fs",
-                    stats.ingested, stats.skipped, cur_delay,
+                    stats.ingested,
+                    stats.skipped,
+                    cur_delay,
                 )
             if cur_delay:
                 time.sleep(cur_delay)

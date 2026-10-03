@@ -19,7 +19,7 @@ _env = os.environ.get("OCPP_SITE_MAP")
 if _env:
     try:
         _DEFAULT_MAP = json.loads(_env)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         _DEFAULT_MAP = {}
 
 
