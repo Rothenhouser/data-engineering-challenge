@@ -143,15 +143,24 @@ if readings.is_empty():
 readings = readings.sort("timestamp")
 st.caption(f"{readings.height} readings")
 
+# Energy.Active.Import.Register is a lifetime odometer; subtract its first value
+# in the session so the curve shows energy delivered this session (from 0).
+reg = readings["energy_register_kwh"].drop_nulls()
+if reg.len() > 0:
+    baseline = reg[0]
+    readings = readings.with_columns(
+        (pl.col("energy_register_kwh") - baseline).alias("cumulative_energy_kwh")
+    )
+
 if readings["power_kw"].drop_nulls().len() > 0:
     st.markdown("**Power (kW)**")
     st.line_chart(readings, x="timestamp", y="power_kw")
 if readings["soc_pct"].drop_nulls().len() > 0:
     st.markdown("**State of charge (%)**")
     st.line_chart(readings, x="timestamp", y="soc_pct")
-if readings["energy_register_kwh"].drop_nulls().len() > 0:
-    st.markdown("**Energy register (kWh, cumulative)**")
-    st.line_chart(readings, x="timestamp", y="energy_register_kwh")
+if "cumulative_energy_kwh" in readings.columns:
+    st.markdown("**Cumulative energy (kWh, this session)**")
+    st.line_chart(readings, x="timestamp", y="cumulative_energy_kwh")
 
 with st.expander("Raw readings"):
     st.dataframe(readings, width="stretch")
