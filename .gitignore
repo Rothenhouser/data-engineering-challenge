@@ -13,6 +13,7 @@ data/*.parquet
 data/archive/
 data/gold/
 data/duckdb/
+data/lake/
 dagster_home/
 *.tmp
 
@@ -27,3 +28,9 @@ _sync_done.txt
 
 # Streamlit dataframe CSV exports
 *_export.csv
+# Agent + Kiro working files
+.agents/
+.kiro/
+
+# OCPP 1.6 reference docs
+docs/OCPP_1.6_documentation/

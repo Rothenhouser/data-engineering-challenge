@@ -83,9 +83,7 @@ def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.
         if faults.is_empty():
             return pl.DataFrame(schema=dict.fromkeys(DAILY_COLUMNS, pl.Null))
         return faults.with_columns(
-            pl.col("station_id")
-            .map_elements(site_for, return_dtype=pl.Utf8)
-            .alias("site_id"),
+            pl.col("station_id").map_elements(site_for, return_dtype=pl.Utf8).alias("site_id"),
             pl.lit(0).alias("session_count"),
             pl.lit(0.0).alias("total_energy_kwh"),
             pl.lit(0.0).alias("avg_power"),

@@ -3,6 +3,16 @@
 from __future__ import annotations
 
 from .analytics import DAILY_COLUMNS, compute_daily_stats
+from .ducklake import (
+    ANALYTICS_TABLE,
+    ARCHIVE_TABLE,
+    READINGS_TABLE,
+    SESSIONS_TABLE,
+    append_frame,
+    connect,
+    read_gold_table,
+    replace_table,
+)
 from .measurands import Measurand, read_measurand
 from .parsing import (
     CALL,
@@ -17,7 +27,7 @@ from .parsing import (
 from .pg import CREATE_TABLE_SQL, init_schema, write_raw_event, write_raw_events
 from .raw_event import RAW_EVENT_FIELDS, to_raw_event_row
 from .readers import (
-    read_archive_duckdb,
+    read_archive_ducklake,
     read_latest_metervalues_per_station_postgres,
     read_latest_per_station_postgres,
     read_recent_window_postgres,
@@ -56,8 +66,16 @@ __all__ = [
     "reconstruct_sessions_and_readings",
     "SESSION_COLUMNS",
     "READING_COLUMNS",
-    "read_archive_duckdb",
+    "read_archive_ducklake",
     "read_recent_window_postgres",
+    "connect",
+    "append_frame",
+    "replace_table",
+    "read_gold_table",
+    "ARCHIVE_TABLE",
+    "SESSIONS_TABLE",
+    "READINGS_TABLE",
+    "ANALYTICS_TABLE",
     "read_latest_per_station_postgres",
     "read_latest_metervalues_per_station_postgres",
     "CREATE_TABLE_SQL",

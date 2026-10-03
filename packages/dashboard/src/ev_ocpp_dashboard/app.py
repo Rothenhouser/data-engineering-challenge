@@ -4,7 +4,7 @@ Reads two stores through the shared library:
 - Postgres (hot landing) for the live status snapshot and the in-flight session
   view, the latter reusing the shared ``reconstruct_sessions`` fold over a
   bounded recent window (Requirements 8.1-8.4, 7.4).
-- Parquet gold for completed-session history and per-station / per-day fleet
+- DuckLake gold for completed-session history and per-station / per-day fleet
   rollups computed on the fly in Polars (Requirement 8.5).
 
 Time-range and station filters apply across the views (Requirements 8.6, 8.7).
@@ -12,7 +12,6 @@ Time-range and station filters apply across the views (Requirements 8.6, 8.7).
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -20,7 +19,9 @@ import polars as pl
 import psycopg
 import streamlit as st
 from ev_ocpp_analysis import (
+    SESSIONS_TABLE,
     Measurand,
+    read_gold_table,
     read_measurand,
     read_recent_window_postgres,
     read_sim_control,
@@ -30,7 +31,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # Streamlit runs this file as a top-level script (no package context), so import
 # config by absolute module path rather than a relative import.
-from ev_ocpp_dashboard.config import GOLD_PATH, PG_URI, WINDOW_MINUTES
+from ev_ocpp_dashboard.config import LAKE_CATALOG, LAKE_DATA, PG_URI, WINDOW_MINUTES
 
 
 def _recent_window(window_minutes: int) -> pl.DataFrame:
@@ -119,8 +120,7 @@ def _charger_overview(window_minutes: int) -> pl.DataFrame:
     now = _sim_now(events)
     sessions = reconstruct_sessions(events, now=now)
     active = (
-        sessions.filter(pl.col("status") == "active")
-        .select(
+        sessions.filter(pl.col("status") == "active").select(
             "station_id",
             pl.lit(True).alias("in_session"),
             pl.col("start_time").alias("session_start"),
@@ -146,10 +146,7 @@ def _charger_overview(window_minutes: int) -> pl.DataFrame:
             .then(pl.col("power_kw"))
             .otherwise(None)
             .alias("current_power_kw"),
-            pl.when(pl.col("in_session"))
-            .then(pl.col("soc_pct"))
-            .otherwise(None)
-            .alias("soc_pct"),
+            pl.when(pl.col("in_session")).then(pl.col("soc_pct")).otherwise(None).alias("soc_pct"),
         )
     )
     # Running session minutes for in-session chargers.
@@ -174,9 +171,7 @@ def _charger_overview(window_minutes: int) -> pl.DataFrame:
 
 @st.cache_data(ttl=30)
 def _gold_sessions() -> pl.DataFrame:
-    if not os.path.exists(GOLD_PATH):
-        return pl.DataFrame()
-    return pl.read_parquet(GOLD_PATH)
+    return read_gold_table(LAKE_CATALOG, LAKE_DATA, SESSIONS_TABLE)
 
 
 def _apply_filters(df: pl.DataFrame, stations: list[str], start, end, ts_col: str) -> pl.DataFrame:

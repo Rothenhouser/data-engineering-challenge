@@ -6,7 +6,7 @@ frame carrying the RawEvent columns the fold expects
 (``station_id, msg_type, unique_id, action, payload, ingest_ts``), so
 "fetch -> fold" is one import.
 
-- Historical: DuckDB scans the immutable Parquet archive (Requirements 7.3, 13.3).
+- Historical: DuckDB reads the immutable cold DuckLake archive table (Requirement 7.3).
 - Live: Postgres via ``polars.read_database_uri`` + ConnectorX (Requirements 7.2, 8.1, 13.2).
 """
 
@@ -16,6 +16,8 @@ import json
 from datetime import datetime
 
 import polars as pl
+
+from .ducklake import ARCHIVE_TABLE, _table_exists, connect
 
 
 def _parse_payloads(df: pl.DataFrame) -> pl.DataFrame:
@@ -48,6 +50,32 @@ def read_archive_duckdb(parquet_glob: str, predicate: str | None = None) -> pl.D
         df = con.execute(sql, [parquet_glob]).pl()
     finally:
         con.close()
+    return _parse_payloads(df)
+
+
+# --- Historical reader: DuckLake cold archive table ------------------------
+
+
+def read_archive_ducklake(
+    catalog_path: str, data_path: str, predicate: str | None = None
+) -> pl.DataFrame:
+    """Read raw events from the cold DuckLake archive table.
+
+    Attaches the DuckLake catalog and selects the RawEvent columns from
+    ``lake.main.raw_events_archive``, handing Polars a frame via ``.pl()``.
+    ``predicate`` is an optional SQL WHERE clause (without the keyword) for
+    pushdown, e.g. ``"station_id = 'charger1'"``. ``payload`` is decoded to dicts
+    for the fold. Returns an empty frame if the table does not yet exist.
+    """
+    where = f" WHERE {predicate}" if predicate else ""
+    sql = (
+        "SELECT station_id, msg_type, unique_id, action, payload, ingest_ts "
+        f"FROM {ARCHIVE_TABLE}{where} ORDER BY event_id"
+    )
+    with connect(catalog_path, data_path) as con:
+        if not _table_exists(con, ARCHIVE_TABLE):
+            return pl.DataFrame()
+        df = con.execute(sql).pl()
     return _parse_payloads(df)
 
 

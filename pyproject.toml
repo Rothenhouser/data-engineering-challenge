@@ -27,6 +27,8 @@ testpaths = ["packages"]
 [tool.poe.tasks]
 sync = "uv sync --all-packages --all-groups"
 test = "pytest"
+# Manual one-time DuckLake init: create the cold+gold catalog + data dir.
+bootstrap = "python -m ev_ocpp_dagster.bootstrap"
 
 # Format first, then lint with autofix. `poe lint` runs both in order.
 lint = ["_fmt", "_lint_fix"]
@@ -35,13 +37,13 @@ _lint_fix = "ruff check --fix ."
 
 # Run the dashboard locally with hot reload, against the containerized Postgres
 # (needs `docker compose up postgres`, which publishes localhost:5432). Reads
-# gold/archive Parquet from the local ./data dir. Reruns on file save.
+# cold+gold from the local DuckLake under ./data/lake. Reruns on file save.
 [tool.poe.tasks.dashboard]
 cmd = "streamlit run packages/dashboard/src/ev_ocpp_dashboard/app.py --server.runOnSave=true"
 [tool.poe.tasks.dashboard.env]
 OCPP_PG_URI = { default = "postgresql://ocpp:ocpp@localhost:5432/ocpp" }
-OCPP_GOLD_PATH = { default = "data/gold/sessions.parquet" }
-OCPP_ARCHIVE_DIR = { default = "data/archive" }
+OCPP_LAKE_CATALOG = { default = "data/lake/catalog.ducklake" }
+OCPP_LAKE_DATA = { default = "data/lake/data" }
 
 [tool.ruff]
 target-version = "py314"

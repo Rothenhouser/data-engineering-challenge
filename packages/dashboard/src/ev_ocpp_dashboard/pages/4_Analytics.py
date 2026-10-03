@@ -1,7 +1,7 @@
 """Fifth page: fleet analytics from the daily gold table.
 
-Reads ``analytics_daily.parquet`` (one row per station per day, produced by the
-Dagster analytics job) and offers:
+Reads the ``gold_analytics_daily`` DuckLake table (one row per station per day,
+produced by the Dagster analytics job) and offers:
 - rank chargers by total energy sold over a chosen day or month,
 - a utilization overview (% of time each charger was in a session),
 - total fault counts per charger.
@@ -9,13 +9,12 @@ Dagster analytics job) and offers:
 
 from __future__ import annotations
 
-import os
-
 import polars as pl
 import streamlit as st
 
 # Absolute import: Streamlit runs page files as top-level scripts (no package).
-from ev_ocpp_dashboard.config import GOLD_ANALYTICS_PATH
+from ev_ocpp_analysis import ANALYTICS_TABLE, read_gold_table
+from ev_ocpp_dashboard.config import LAKE_CATALOG, LAKE_DATA
 
 st.set_page_config(page_title="Analytics", layout="wide")
 st.title("Fleet analytics")
@@ -23,9 +22,7 @@ st.title("Fleet analytics")
 
 @st.cache_data(ttl=30)
 def _daily() -> pl.DataFrame:
-    if not os.path.exists(GOLD_ANALYTICS_PATH):
-        return pl.DataFrame()
-    return pl.read_parquet(GOLD_ANALYTICS_PATH)
+    return read_gold_table(LAKE_CATALOG, LAKE_DATA, ANALYTICS_TABLE)
 
 
 daily = _daily()

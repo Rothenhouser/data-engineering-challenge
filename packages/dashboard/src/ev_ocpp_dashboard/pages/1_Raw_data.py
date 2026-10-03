@@ -1,20 +1,22 @@
-"""Second page: raw inspection of the landing table and the Parquet files.
+"""Second page: raw inspection of the landing table and the DuckLake tables.
 
 Shows the first N rows of the Postgres ``raw_events`` table and previews the
-immutable Parquet archive files and the gold session facts, so you can see
+immutable DuckLake cold archive table and the gold session facts, so you can see
 exactly what is landing and being derived.
 """
 
 from __future__ import annotations
 
-import glob
-import os
-
 import polars as pl
 import streamlit as st
 
 # Absolute import: Streamlit runs page files as top-level scripts (no package).
-from ev_ocpp_dashboard.config import ARCHIVE_DIR, GOLD_PATH, PG_URI
+from ev_ocpp_analysis import (
+    SESSIONS_TABLE,
+    read_archive_ducklake,
+    read_gold_table,
+)
+from ev_ocpp_dashboard.config import LAKE_CATALOG, LAKE_DATA, PG_URI
 
 st.set_page_config(page_title="Raw data", layout="wide")
 st.title("Raw data inspector")
@@ -47,23 +49,20 @@ try:
 except Exception as exc:  # noqa: BLE001 - surface any conn/query error in the UI
     st.error(f"Could not read raw_events: {exc}")
 
-# --- Parquet archive --------------------------------------------------------
-st.subheader("Cold Parquet archive")
-files = sorted(glob.glob(os.path.join(ARCHIVE_DIR, "*.parquet")))
-if not files:
-    st.info(f"No archive files in {ARCHIVE_DIR} yet — run the Dagster dump job.")
+# --- Cold DuckLake archive --------------------------------------------------
+st.subheader("Cold DuckLake archive")
+archive = read_archive_ducklake(LAKE_CATALOG, LAKE_DATA)
+if archive.is_empty():
+    st.info("No rows in the DuckLake archive table yet — run the Dagster dump job.")
 else:
-    st.caption(f"{len(files)} archive file(s) in {ARCHIVE_DIR}")
-    picked = st.selectbox("Archive file", files, format_func=os.path.basename)
-    df = pl.read_parquet(picked)
-    st.caption(f"{df.height} rows x {df.width} cols")
-    st.dataframe(df.head(n), width="stretch")
+    st.caption(f"{archive.height} rows in the DuckLake archive table")
+    st.dataframe(archive.head(n), width="stretch")
 
 # --- Gold session facts -----------------------------------------------------
 st.subheader("Gold session facts")
-if os.path.exists(GOLD_PATH):
-    gold = pl.read_parquet(GOLD_PATH)
-    st.caption(f"{gold.height} sessions in {GOLD_PATH}")
-    st.dataframe(gold.head(n), width="stretch")
+gold = read_gold_table(LAKE_CATALOG, LAKE_DATA, SESSIONS_TABLE)
+if gold.is_empty():
+    st.info("No gold sessions yet — run the Dagster session job.")
 else:
-    st.info(f"No gold file at {GOLD_PATH} yet — run the Dagster session job.")
+    st.caption(f"{gold.height} sessions in the DuckLake gold table")
+    st.dataframe(gold.head(n), width="stretch")

@@ -3,13 +3,15 @@
 # Services:
 #   postgres   - hot raw landing zone (raw_events)
 #   dagster    - host running webserver + daemon serving ev_ocpp_dagster
-#                (historical loader sensor, dump-to-Parquet job, session job)
+#                (historical loader sensor, dump-to-DuckLake job, session job)
 #   stream     - standalone ev_ocpp_stream consumer; scale with --scale stream=N
-#   streamlit  - dashboard reading Postgres (live) and Parquet gold (history)
+#   streamlit  - dashboard reading Postgres (live) and DuckLake gold (history)
 #
 # The host `data/` directory is bind-mounted at /app/data in every app
 # container as the shared volume: it already holds the input `.txt` files, and
-# the Parquet archive + gold are written back into it (Requirement 14.6).
+# the DuckLake cold archive + gold (catalog file + data dir under
+# `data/lake/`) are written back into it (Requirement 14.6). DuckLake is
+# embedded (DuckDB extension), so there is no separate lake service.
 
 name: ev-ocpp
 
@@ -41,8 +43,8 @@ services:
     environment:
       OCPP_PG_URI: *pg_uri
       OCPP_DATA_DIR: /app/data
-      OCPP_ARCHIVE_DIR: /app/data/archive
-      OCPP_GOLD_DIR: /app/data/gold
+      OCPP_LAKE_CATALOG: /app/data/lake/catalog.ducklake
+      OCPP_LAKE_DATA: /app/data/lake/data
       DAGSTER_HOME: /app/dagster_home
     volumes:
       - ../data:/app/data
@@ -77,8 +79,8 @@ services:
       ev-ocpp-dashboard --server.address=0.0.0.0 --server.port=8501
     environment:
       OCPP_PG_URI: *pg_uri
-      OCPP_GOLD_PATH: /app/data/gold/sessions.parquet
-      OCPP_ARCHIVE_DIR: /app/data/archive
+      OCPP_LAKE_CATALOG: /app/data/lake/catalog.ducklake
+      OCPP_LAKE_DATA: /app/data/lake/data
     volumes:
       - ../data:/app/data
     ports:

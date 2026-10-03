@@ -4,25 +4,30 @@ Flow: pick a charger -> see its historical sessions (gold) plus the current live
 session if one is open -> pick a session -> plot its charging curve (power and
 SoC over time).
 
-Historical sessions and their readings come from the gold Parquet tables
-(``sessions.parquet`` / ``session_readings.parquet``). The current session and
-its readings are reconstructed live from the recent Postgres window with the same
+Historical sessions and their readings come from the gold DuckLake tables
+(``gold_sessions`` / ``gold_session_readings``). The current session and its
+readings are reconstructed live from the recent Postgres window with the same
 shared fold, so a live session matches how it will later appear in gold.
 """
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
 import streamlit as st
 
 # Absolute imports: Streamlit runs page files as top-level scripts (no package).
-from ev_ocpp_analysis import read_recent_window_postgres, reconstruct_sessions_and_readings
+from ev_ocpp_analysis import (
+    READINGS_TABLE,
+    SESSIONS_TABLE,
+    read_gold_table,
+    read_recent_window_postgres,
+    reconstruct_sessions_and_readings,
+)
 from ev_ocpp_dashboard.config import (
-    GOLD_PATH,
-    GOLD_READINGS_PATH,
+    LAKE_CATALOG,
+    LAKE_DATA,
     PG_URI,
     WINDOW_MINUTES,
 )
@@ -33,12 +38,8 @@ st.title("Charging sessions")
 
 @st.cache_data(ttl=30)
 def _gold() -> tuple[pl.DataFrame, pl.DataFrame]:
-    sessions = pl.read_parquet(GOLD_PATH) if os.path.exists(GOLD_PATH) else pl.DataFrame()
-    readings = (
-        pl.read_parquet(GOLD_READINGS_PATH)
-        if os.path.exists(GOLD_READINGS_PATH)
-        else pl.DataFrame()
-    )
+    sessions = read_gold_table(LAKE_CATALOG, LAKE_DATA, SESSIONS_TABLE)
+    readings = read_gold_table(LAKE_CATALOG, LAKE_DATA, READINGS_TABLE)
     return sessions, readings
 
 
@@ -87,9 +88,7 @@ hist = (
     else pl.DataFrame()
 )
 current = (
-    live_sessions.filter(
-        (pl.col("station_id") == station) & (pl.col("status") == "active")
-    )
+    live_sessions.filter((pl.col("station_id") == station) & (pl.col("status") == "active"))
     if not live_sessions.is_empty()
     else pl.DataFrame()
 )

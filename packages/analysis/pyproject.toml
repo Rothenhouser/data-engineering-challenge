@@ -5,7 +5,7 @@ description = "OCPP parsing, session reconstruction, and DuckDB/Postgres read la
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "duckdb>=1.1",
+    "duckdb>=1.3",
     "polars>=1.44",
     "connectorx>=0.4",
     "psycopg[binary]>=3.2",

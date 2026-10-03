@@ -36,8 +36,10 @@ except psycopg.Error as exc:
     st.error(f"Could not reach Postgres: {exc}")
     st.stop()
 
-st.caption("These controls are shared via Postgres; the stream consumer and the "
-           "live views pick them up within a few seconds.")
+st.caption(
+    "These controls are shared via Postgres; the stream consumer and the "
+    "live views pick them up within a few seconds."
+)
 
 # --- streaming speed --------------------------------------------------------
 st.subheader("Streaming speed")
