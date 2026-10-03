@@ -36,7 +36,7 @@ def _measurand(payload: dict[str, Any], name: str) -> float | None:
             if sv.get("measurand") == name:
                 try:
                     return float(sv["value"])
-                except (KeyError, TypeError, ValueError):
+                except KeyError, TypeError, ValueError:
                     return None
     return None
 
@@ -107,9 +107,10 @@ def main() -> None:
 
     # --- live status --------------------------------------------------------
     st.subheader("Live status (latest event per charger)")
-    st.dataframe(live_f, use_container_width=True) if not live_f.is_empty() else st.info(
-        "No live events — is the stream consumer running against Postgres?"
-    )
+    if live_f.is_empty():
+        st.info("No live events — is the stream consumer running against Postgres?")
+    else:
+        st.dataframe(live_f, width="stretch")
 
     # --- in-flight sessions -------------------------------------------------
     st.subheader(f"In-flight sessions (last {WINDOW_MINUTES} min)")
@@ -123,10 +124,14 @@ def main() -> None:
         )
         st.dataframe(
             inflight.select(
-                "station_id", "connector_id", "running_seconds",
-                "total_energy_kwh", "avg_power", "peak_power",
+                "station_id",
+                "connector_id",
+                "running_seconds",
+                "total_energy_kwh",
+                "avg_power",
+                "peak_power",
             ),
-            use_container_width=True,
+            width="stretch",
         )
 
     # --- historical analytics ----------------------------------------------
@@ -134,14 +139,18 @@ def main() -> None:
     if gold_f.is_empty():
         st.info("No gold session facts yet — run the Dagster session job.")
         return
-    st.dataframe(gold_f, use_container_width=True)
+    st.dataframe(gold_f, width="stretch")
 
-    per_station = gold_f.group_by("station_id").agg(
-        pl.len().alias("sessions"),
-        pl.col("total_energy_kwh").sum().round(2).alias("energy_kwh"),
-        pl.col("avg_power").mean().round(2).alias("avg_power"),
-        pl.col("peak_power").max().alias("peak_power"),
-    ).sort("station_id")
+    per_station = (
+        gold_f.group_by("station_id")
+        .agg(
+            pl.len().alias("sessions"),
+            pl.col("total_energy_kwh").sum().round(2).alias("energy_kwh"),
+            pl.col("avg_power").mean().round(2).alias("avg_power"),
+            pl.col("peak_power").max().alias("peak_power"),
+        )
+        .sort("station_id")
+    )
     per_day = (
         gold_f.with_columns(pl.col("start_time").dt.date().alias("day"))
         .group_by("day")
@@ -154,10 +163,10 @@ def main() -> None:
     col1, col2 = st.columns(2)
     with col1:
         st.caption("Per station")
-        st.dataframe(per_station, use_container_width=True)
+        st.dataframe(per_station, width="stretch")
     with col2:
         st.caption("Per day")
-        st.dataframe(per_day, use_container_width=True)
+        st.dataframe(per_day, width="stretch")
 
 
 main()
