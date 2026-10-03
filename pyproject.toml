@@ -32,6 +32,16 @@ lint = ["_fmt", "_lint_fix"]
 _fmt = "ruff format ."
 _lint_fix = "ruff check --fix ."
 
+# Run the dashboard locally with hot reload, against the containerized Postgres
+# (needs `docker compose up postgres`, which publishes localhost:5432). Reads
+# gold/archive Parquet from the local ./data dir. Reruns on file save.
+[tool.poe.tasks.dashboard]
+cmd = "streamlit run packages/dashboard/src/ev_ocpp_dashboard/app.py --server.runOnSave=true"
+[tool.poe.tasks.dashboard.env]
+OCPP_PG_URI = { default = "postgresql://ocpp:ocpp@localhost:5432/ocpp" }
+OCPP_GOLD_PATH = { default = "data/gold/sessions.parquet" }
+OCPP_ARCHIVE_DIR = { default = "data/archive" }
+
 [tool.ruff]
 target-version = "py314"
 line-length = 100
