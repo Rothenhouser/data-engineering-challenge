@@ -19,6 +19,7 @@ from typing import Any
 import polars as pl
 import streamlit as st
 from ev_ocpp_analysis import (
+    read_latest_metervalues_per_station_postgres,
     read_latest_per_station_postgres,
     read_recent_window_postgres,
     reconstruct_sessions,
@@ -43,14 +44,29 @@ def _measurand(payload: dict[str, Any], name: str) -> float | None:
 
 @st.cache_data(ttl=5)
 def _latest_per_station() -> pl.DataFrame:
+    # Latest event per station gives the status + ingest_ts, but it is usually a
+    # Heartbeat/ack with no readings — so pull the latest MeterValues separately
+    # for the power/SoC columns and join them in.
     df = read_latest_per_station_postgres(PG_URI)
     if df.is_empty():
         return df
-    payloads = df["payload"].to_list()
-    return df.with_columns(
-        pl.Series("power_kw", [_measurand(p, "Power.Active.Import") for p in payloads]),
-        pl.Series("soc_pct", [_measurand(p, "SoC") for p in payloads]),
-    ).select("station_id", "action", "power_kw", "soc_pct", "ingest_ts")
+    status = df.select("station_id", "action", "ingest_ts")
+
+    mv = read_latest_metervalues_per_station_postgres(PG_URI)
+    if mv.is_empty():
+        readings = pl.DataFrame(
+            {"station_id": [], "power_kw": [], "soc_pct": []},
+            schema={"station_id": pl.Utf8, "power_kw": pl.Float64, "soc_pct": pl.Float64},
+        )
+    else:
+        payloads = mv["payload"].to_list()
+        readings = mv.select("station_id").with_columns(
+            pl.Series("power_kw", [_measurand(p, "Power.Active.Import") for p in payloads]),
+            pl.Series("soc_pct", [_measurand(p, "SoC") for p in payloads]),
+        )
+    return status.join(readings, on="station_id", how="left").select(
+        "station_id", "action", "power_kw", "soc_pct", "ingest_ts"
+    )
 
 
 @st.cache_data(ttl=5)

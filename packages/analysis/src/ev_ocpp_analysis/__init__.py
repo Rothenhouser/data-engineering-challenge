@@ -16,6 +16,7 @@ from .pg import CREATE_TABLE_SQL, init_schema, write_raw_event, write_raw_events
 from .raw_event import RAW_EVENT_FIELDS, to_raw_event_row
 from .readers import (
     read_archive_duckdb,
+    read_latest_metervalues_per_station_postgres,
     read_latest_per_station_postgres,
     read_recent_window_postgres,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "read_archive_duckdb",
     "read_recent_window_postgres",
     "read_latest_per_station_postgres",
+    "read_latest_metervalues_per_station_postgres",
     "CREATE_TABLE_SQL",
     "init_schema",
     "write_raw_event",

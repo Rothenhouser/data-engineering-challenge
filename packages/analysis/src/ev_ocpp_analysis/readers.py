@@ -82,3 +82,19 @@ def read_latest_per_station_postgres(conn_uri: str) -> pl.DataFrame:
     )
     df = pl.read_database_uri(query, conn_uri, engine="connectorx")
     return _parse_payloads(df)
+
+
+def read_latest_metervalues_per_station_postgres(conn_uri: str) -> pl.DataFrame:
+    """Read the latest MeterValues RawEvent per ``station_id``.
+
+    The newest event per station is usually a Heartbeat/ack with no readings;
+    power and SoC only live in MeterValues payloads, so the live status view
+    pulls the latest MeterValues separately for its measurand columns.
+    """
+    query = (
+        "SELECT DISTINCT ON (station_id) station_id, payload::text AS payload, ingest_ts "
+        "FROM raw_events WHERE action = 'MeterValues' "
+        "ORDER BY station_id, event_id DESC"
+    )
+    df = pl.read_database_uri(query, conn_uri, engine="connectorx")
+    return _parse_payloads(df)
