@@ -20,6 +20,8 @@ import polars as pl
 import psycopg
 import streamlit as st
 from ev_ocpp_analysis import (
+    Measurand,
+    read_measurand,
     read_recent_window_postgres,
     read_sim_control,
     reconstruct_sessions,
@@ -29,18 +31,6 @@ from streamlit_autorefresh import st_autorefresh
 # Streamlit runs this file as a top-level script (no package context), so import
 # config by absolute module path rather than a relative import.
 from ev_ocpp_dashboard.config import GOLD_PATH, PG_URI, WINDOW_MINUTES
-
-
-def _measurand(payload: dict[str, Any], name: str) -> float | None:
-    """Pull a single measurand value from a MeterValues payload."""
-    for mv in payload.get("meterValue") or []:
-        for sv in mv.get("sampledValue") or []:
-            if sv.get("measurand") == name:
-                try:
-                    return float(sv["value"])
-                except (KeyError, TypeError, ValueError):
-                    return None
-    return None
 
 
 def _recent_window(window_minutes: int) -> pl.DataFrame:
@@ -104,8 +94,8 @@ def _latest_readings(events: pl.DataFrame) -> pl.DataFrame:
         cur["last_seen"] = r["ingest_ts"]
         if r.get("action") == "MeterValues":
             payload = r["payload"] if isinstance(r["payload"], dict) else {}
-            p = _measurand(payload, "Power.Active.Import")
-            s = _measurand(payload, "SoC")
+            p = read_measurand(payload, Measurand.POWER_ACTIVE_IMPORT)
+            s = read_measurand(payload, Measurand.SOC)
             if p is not None:
                 cur["power_kw"] = p
             if s is not None:
@@ -150,10 +140,16 @@ def _charger_overview(window_minutes: int) -> pl.DataFrame:
         readings.join(active, on="station_id", how="left")
         .with_columns(pl.col("in_session").fill_null(False))  # noqa: FBT003
         .with_columns(
+            # Power and SoC are transaction-time readings — only meaningful while
+            # the charger is in a session, so blank them out otherwise.
             pl.when(pl.col("in_session"))
             .then(pl.col("power_kw"))
             .otherwise(None)
             .alias("current_power_kw"),
+            pl.when(pl.col("in_session"))
+            .then(pl.col("soc_pct"))
+            .otherwise(None)
+            .alias("soc_pct"),
         )
     )
     # Running session minutes for in-session chargers.
