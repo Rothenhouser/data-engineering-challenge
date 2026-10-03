@@ -24,6 +24,7 @@ from ev_ocpp_analysis import (
     read_recent_window_postgres,
     reconstruct_sessions,
 )
+from streamlit_autorefresh import st_autorefresh
 
 # Streamlit runs this file as a top-level script (no package context), so import
 # config by absolute module path rather than a relative import.
@@ -117,6 +118,14 @@ def main() -> None:
         today = datetime.now(UTC).date()
         start = st.date_input("From", today - timedelta(days=7))
         end = st.date_input("To", today)
+
+        st.header("Auto-refresh")
+        auto = st.toggle("Enabled", value=True)
+        every = st.slider("Interval (s)", 2, 60, 5, disabled=not auto)
+        if auto:
+            # Rerun the whole script on a timer; the cached readers (ttl=5s)
+            # keep it cheap, so live views stay current without manual reload.
+            st_autorefresh(interval_ms=every * 1000, key="auto_refresh")
 
     live_f = _apply_filters(live, picked, start, end, "ingest_ts")
     gold_f = _apply_filters(gold, picked, start, end, "start_time")

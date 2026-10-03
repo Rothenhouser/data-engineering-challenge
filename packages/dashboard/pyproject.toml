@@ -8,6 +8,7 @@ dependencies = [
     "ev-ocpp-analysis",
     "polars>=1.44",
     "streamlit>=1.40",
+    "streamlit-autorefresh>=1.0",
 ]
 
 [project.scripts]
