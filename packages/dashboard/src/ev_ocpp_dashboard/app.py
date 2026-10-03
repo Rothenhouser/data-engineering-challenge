@@ -24,7 +24,9 @@ from ev_ocpp_analysis import (
     reconstruct_sessions,
 )
 
-from .config import GOLD_PATH, PG_URI, WINDOW_MINUTES
+# Streamlit runs this file as a top-level script (no package context), so import
+# config by absolute module path rather than a relative import.
+from ev_ocpp_dashboard.config import GOLD_PATH, PG_URI, WINDOW_MINUTES
 
 
 def _measurand(payload: dict[str, Any], name: str) -> float | None:
