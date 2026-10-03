@@ -21,12 +21,14 @@ from typing import Any
 import polars as pl
 
 from .measurands import Measurand, read_measurand
+from .sites import site_for
 
 # Columns a raw-event frame must carry for the fold (the RawEvent shape).
 RAW_COLUMNS = ("station_id", "msg_type", "unique_id", "action", "payload", "ingest_ts")
 SESSION_COLUMNS = (
     "session_id",
     "station_id",
+    "site_id",
     "connector_id",
     "status",
     "start_time",
@@ -133,19 +135,21 @@ def reconstruct_sessions(
     events: pl.DataFrame,
     now: datetime | None = None,
     active_window_seconds: float = DEFAULT_ACTIVE_WINDOW_SECONDS,
+    sites: dict[str, str] | None = None,
 ) -> pl.DataFrame:
     """Reconstruct charging-session facts from a raw-event frame.
 
     Thin wrapper over :func:`reconstruct_sessions_and_readings` returning only the
     session facts (unchanged contract for existing callers).
     """
-    return reconstruct_sessions_and_readings(events, now, active_window_seconds)[0]
+    return reconstruct_sessions_and_readings(events, now, active_window_seconds, sites)[0]
 
 
 def reconstruct_sessions_and_readings(
     events: pl.DataFrame,
     now: datetime | None = None,
     active_window_seconds: float = DEFAULT_ACTIVE_WINDOW_SECONDS,
+    sites: dict[str, str] | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Reconstruct sessions *and* their per-session time-series readings.
 
@@ -203,6 +207,7 @@ def reconstruct_sessions_and_readings(
         return {
             "session_id": s["session_id"],
             "station_id": s["station_id"],
+            "site_id": site_for(s["station_id"], sites),
             "connector_id": s["connector_id"],
             "status": status,
             "start_time": start,
@@ -282,6 +287,7 @@ def reconstruct_sessions_and_readings(
     sessions_schema = {
         "session_id": pl.Utf8,
         "station_id": pl.Utf8,
+        "site_id": pl.Utf8,
         "connector_id": pl.Int64,
         "status": pl.Utf8,
         "start_time": pl.Datetime,
@@ -294,7 +300,9 @@ def reconstruct_sessions_and_readings(
         "stop_reason": pl.Utf8,
     }
     sessions = (
-        pl.DataFrame(done).select(SESSION_COLUMNS)
+        # schema_overrides pins nullable columns (e.g. an all-None site_id or
+        # duration) to their real dtype instead of Polars inferring Null.
+        pl.DataFrame(done, schema_overrides=sessions_schema).select(SESSION_COLUMNS)
         if done
         else pl.DataFrame(schema=sessions_schema)
     )

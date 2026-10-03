@@ -20,8 +20,11 @@ from datetime import datetime
 
 import polars as pl
 
+from .sites import site_for
+
 DAILY_COLUMNS = (
     "station_id",
+    "site_id",
     "day",
     "session_count",
     "total_energy_kwh",
@@ -80,6 +83,9 @@ def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.
         if faults.is_empty():
             return pl.DataFrame(schema=dict.fromkeys(DAILY_COLUMNS, pl.Null))
         return faults.with_columns(
+            pl.col("station_id")
+            .map_elements(site_for, return_dtype=pl.Utf8)
+            .alias("site_id"),
             pl.lit(0).alias("session_count"),
             pl.lit(0.0).alias("total_energy_kwh"),
             pl.lit(0.0).alias("avg_power"),
@@ -88,10 +94,12 @@ def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.
             pl.lit(0.0).alias("utilization_pct"),
         ).select(DAILY_COLUMNS)
 
+    has_site = "site_id" in sessions.columns
     daily = (
         sessions.with_columns(pl.col("start_time").dt.date().alias("day"))
         .group_by("station_id", "day")
         .agg(
+            (pl.col("site_id").first() if has_site else pl.lit(None)).alias("site_id"),
             pl.len().cast(pl.UInt32).alias("session_count"),
             pl.col("total_energy_kwh").sum().round(3).alias("total_energy_kwh"),
             pl.col("avg_power").mean().round(2).alias("avg_power"),
@@ -109,5 +117,9 @@ def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.
         pl.col("session_count").fill_null(0),
         pl.col("total_energy_kwh").fill_null(0.0),
         pl.col("utilization_pct").fill_null(0.0),
+        # Fault-only days (no session) have no site_id from the left side.
+        pl.col("site_id").fill_null(
+            pl.col("station_id").map_elements(site_for, return_dtype=pl.Utf8)
+        ),
     )
     return out.select(DAILY_COLUMNS).sort("day", "station_id")
