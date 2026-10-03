@@ -146,3 +146,55 @@ def read_gold_table(catalog_path: str, data_path: str, table: str) -> pl.DataFra
         if not _table_exists(con, table):
             return pl.DataFrame()
         return con.execute(f"SELECT * FROM {table}").pl()
+
+
+def catalog_overview(catalog_path: str, data_path: str) -> dict[str, pl.DataFrame]:
+    """Summarize the DuckLake catalog for human inspection.
+
+    The raw ``ducklake_*`` catalog tables are internal bookkeeping and bury the
+    useful facts; this surfaces them as three ready-to-display frames:
+
+    - ``tables``:    one row per catalog table with its live row count.
+    - ``columns``:   the column schema (name + type) of every catalog table.
+    - ``snapshots``: the DuckLake snapshot history (one row per commit), newest
+      first — each archive append and each gold rebuild is a snapshot.
+
+    All frames are empty when the catalog has no tables / no snapshots yet.
+    """
+    empty = pl.DataFrame()
+    with connect(catalog_path, data_path) as con:
+        tables = con.execute(
+            "SELECT table_name FROM information_schema.tables "
+            f"WHERE table_catalog = '{CATALOG_ALIAS}' ORDER BY table_name"
+        ).pl()
+
+        if tables.is_empty():
+            return {"tables": empty, "columns": empty, "snapshots": _snapshots(con)}
+
+        # Per-table live row counts (SELECT count(*) per table — a few tables).
+        counts = {
+            name: con.execute(f"SELECT count(*) FROM {CATALOG_ALIAS}.{SCHEMA}.{name}").fetchone()[0]
+            for name in tables["table_name"].to_list()
+        }
+        tables = tables.with_columns(
+            pl.col("table_name").replace_strict(counts, return_dtype=pl.Int64).alias("rows")
+        )
+
+        columns = con.execute(
+            "SELECT table_name, column_name, data_type, ordinal_position "
+            "FROM information_schema.columns "
+            f"WHERE table_catalog = '{CATALOG_ALIAS}' "
+            "ORDER BY table_name, ordinal_position"
+        ).pl()
+
+        return {"tables": tables, "columns": columns, "snapshots": _snapshots(con)}
+
+
+def _snapshots(con: duckdb.DuckDBPyConnection) -> pl.DataFrame:
+    """DuckLake snapshot history (newest first), empty if none/unavailable."""
+    try:
+        return con.execute(
+            f"SELECT * FROM ducklake_snapshots('{CATALOG_ALIAS}') ORDER BY snapshot_id DESC"
+        ).pl()
+    except Exception:  # noqa: BLE001 - no snapshots yet or function unavailable
+        return pl.DataFrame()
