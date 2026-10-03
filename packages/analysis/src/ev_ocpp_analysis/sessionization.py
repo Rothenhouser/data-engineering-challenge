@@ -179,13 +179,21 @@ def reconstruct_sessions_and_readings(
 
     def finalize(s: dict[str, Any], end: datetime | None, reason: str | None) -> dict[str, Any]:
         start = s["start_time"]
-        close = end or now
-        duration = max((close - start).total_seconds(), 0.0)
         powers = s["powers"]
         avg_power = sum(powers) / len(powers) if powers else 0.0
         peak_power = max(powers) if powers else 0.0
-        # Energy (kWh) = mean power (kW) x duration (hours).
-        energy = avg_power * (duration / 3600.0)
+        # Duration only exists once the session has closed (a StopTransaction);
+        # for open/incomplete sessions leave it None rather than guessing to-now.
+        duration = (end - start).total_seconds() if end is not None else None
+        # Energy charged = meter register delta (the charger's metered truth),
+        # which works for both completed and still-open sessions. Fall back to the
+        # power-integral only when no register readings were seen.
+        if s["reg_first"] is not None and s["reg_last"] is not None:
+            energy = max(s["reg_last"] - s["reg_first"], 0.0)
+        elif duration is not None:
+            energy = avg_power * (duration / 3600.0)
+        else:
+            energy = None
         if end is not None:
             status = "completed"
         elif (now - start).total_seconds() <= active_window_seconds:
@@ -225,6 +233,8 @@ def reconstruct_sessions_and_readings(
                 "start_time": r["_time"],
                 "powers": [],
                 "event_count": 1,
+                "reg_first": None,  # first/last Energy.Active.Import.Register seen
+                "reg_last": None,
             }
             uid_to_connector[(station, r.get("unique_id"))] = connector
         elif action is None and payload.get("transactionId") is not None:
@@ -247,6 +257,11 @@ def reconstruct_sessions_and_readings(
                 p = _power_sample(payload)
                 if p is not None:
                     s["powers"].append(p)
+                reg = read_measurand(payload, Measurand.ENERGY_REGISTER)
+                if reg is not None:
+                    if s["reg_first"] is None:
+                        s["reg_first"] = reg
+                    s["reg_last"] = reg
                 # Record the charging-curve sample linked to this session,
                 # timestamped by the MeterValues sample time where present.
                 readings.append(
@@ -256,7 +271,7 @@ def reconstruct_sessions_and_readings(
                         "timestamp": _metervalue_time(payload) or r["_time"],
                         "power_kw": p,
                         "soc_pct": read_measurand(payload, Measurand.SOC),
-                        "energy_register_kwh": read_measurand(payload, Measurand.ENERGY_REGISTER),
+                        "energy_register_kwh": reg,
                     }
                 )
 
