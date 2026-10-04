@@ -3,11 +3,11 @@
 Reads the ``gold_analytics_daily`` DuckLake table (one row per
 ``(charger_id, connector_id, day)``, produced by the Dagster analytics job).
 
-A selector at the top scopes everything below to either a whole charger
-(its connectors rolled up) or a single connector:
-- rank chargers by total energy sold over a chosen day or month,
-- a utilization overview (% of time in a session),
-- total fault counts.
+Layout, top to bottom:
+- A fleet-wide **ranking** table over a chosen day or month: every charger (or
+  connector, via the toggle) with its total energy, utilization and faults.
+- A **selection** of one charger (or connector) with its day-by-day history
+  (energy, utilization, faults) below.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def _roll_up_to_charger(df: pl.DataFrame) -> pl.DataFrame:
             pl.col("utilization_pct").mean().round(2),
             pl.col("fault_count").sum(),
         )
-        .select(daily.columns)
+        .select(df.columns)
     )
 
 
@@ -62,46 +62,39 @@ daily = daily.with_columns(pl.col("day").cast(pl.Date))
 min_day, max_day = daily["day"].min(), daily["day"].max()
 st.caption(f"Data spans {min_day} → {max_day} across {daily['charger_id'].n_unique()} chargers.")
 
-# --- scope selector ---------------------------------------------------------
-mode = st.radio("View", ["Charger (total)", "Connector"], horizontal=True)
-chargers = sorted(daily["charger_id"].unique().to_list())
-charger = st.selectbox("Charger", chargers)
+# --- granularity: whole charger (connectors rolled up) or per connector -----
+by_connector = st.toggle("Break down by connector", value=False)
+view = daily if by_connector else _roll_up_to_charger(daily)
+unit = "connector" if by_connector else "charger"
 
-if mode == "Connector":
-    connectors = sorted(
-        daily.filter(pl.col("charger_id") == charger)["connector_id"].unique().to_list()
-    )
-    connector = st.selectbox("Connector", connectors)
-    scope = daily.filter((pl.col("charger_id") == charger) & (pl.col("connector_id") == connector))
-    st.caption(f"Scoped to charger {charger}, connector {connector}.")
-else:
-    scope = _roll_up_to_charger(daily.filter(pl.col("charger_id") == charger))
-    st.caption(f"Scoped to charger {charger} (all connectors rolled up).")
-
-# --- energy ranking (per day or per month) ---------------------------------
-st.subheader("Energy sold — ranking")
+# =============================================================================
+# Ranking — fleet-wide, over a chosen day or month
+# =============================================================================
+st.subheader("Ranking")
 grain = st.radio("Period", ["Day", "Month"], horizontal=True)
 
 if grain == "Day":
-    days = sorted(scope["day"].unique().to_list(), reverse=True)
+    days = sorted(view["day"].unique().to_list(), reverse=True)
     pick = st.selectbox("Day", days)
-    scoped = scope.filter(pl.col("day") == pick)
+    period = view.filter(pl.col("day") == pick)
     label = str(pick)
 else:
     months = (
-        scope.with_columns(pl.col("day").dt.strftime("%Y-%m").alias("month"))["month"]
+        view.with_columns(pl.col("day").dt.strftime("%Y-%m").alias("month"))["month"]
         .unique()
         .sort(descending=True)
         .to_list()
     )
     pick = st.selectbox("Month", months)
-    scoped = scope.filter(pl.col("day").dt.strftime("%Y-%m") == pick)
+    period = view.filter(pl.col("day").dt.strftime("%Y-%m") == pick)
     label = pick
 
+key_cols = ["charger_id", "connector_id"] if by_connector else ["charger_id"]
 ranking = (
-    scoped.group_by("charger_id", "connector_id")
+    period.group_by(key_cols)
     .agg(
         pl.col("total_energy_kwh").sum().round(2).alias("energy_kwh"),
+        pl.col("utilization_pct").mean().round(2).alias("avg_utilization_pct"),
         pl.col("session_count").sum().alias("sessions"),
         pl.col("fault_count").sum().alias("faults"),
     )
@@ -110,26 +103,55 @@ ranking = (
 if ranking.is_empty():
     st.info(f"No data for {label}.")
 else:
-    st.caption(f"Total energy sold — {label}")
+    st.caption(f"All {unit}s — {label}, ranked by energy sold")
     st.dataframe(ranking, width="stretch")
-    st.metric("Energy sold (kWh)", float(ranking["energy_kwh"].sum()))
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Energy sold (kWh)", float(ranking["energy_kwh"].sum()))
+    c2.metric("Sessions", int(ranking["sessions"].sum()))
+    c3.metric("Faults", int(ranking["faults"].sum()))
 
-# --- utilization overview ---------------------------------------------------
-st.subheader("Utilization — share of time in a session")
-util = (
+st.divider()
+
+# =============================================================================
+# Selection — one charger / connector, history over days
+# =============================================================================
+st.subheader("History")
+chargers = sorted(view["charger_id"].unique().to_list())
+charger = st.selectbox("Charger", chargers)
+
+if by_connector:
+    connectors = sorted(
+        view.filter(pl.col("charger_id") == charger)["connector_id"].unique().to_list()
+    )
+    connector = st.selectbox("Connector", connectors)
+    scope = view.filter((pl.col("charger_id") == charger) & (pl.col("connector_id") == connector))
+    st.caption(f"Charger {charger}, connector {connector} — day-by-day history.")
+else:
+    scope = view.filter(pl.col("charger_id") == charger)
+    st.caption(f"Charger {charger} (all connectors) — day-by-day history.")
+
+history = (
     scope.group_by("day")
-    .agg(pl.col("utilization_pct").mean().round(2).alias("avg_utilization_pct"))
+    .agg(
+        pl.col("total_energy_kwh").sum().round(2).alias("energy_kwh"),
+        pl.col("utilization_pct").mean().round(2).alias("avg_utilization_pct"),
+        pl.col("fault_count").sum().alias("faults"),
+    )
     .sort("day")
 )
-st.caption("Daily utilization (% of the day in a session)")
-st.bar_chart(util, x="day", y="avg_utilization_pct")
 
-# --- faults -----------------------------------------------------------------
-st.subheader("Faults")
-faults = scope.group_by("day").agg(pl.col("fault_count").sum().alias("total_faults")).sort("day")
-c1, c2 = st.columns([2, 1])
-with c1:
-    st.bar_chart(faults, x="day", y="total_faults")
-with c2:
-    st.metric("Total faults", int(faults["total_faults"].sum()))
-    st.dataframe(faults, width="stretch")
+col1, col2 = st.columns(2)
+with col1:
+    st.caption("Energy sold per day (kWh)")
+    st.bar_chart(history, x="day", y="energy_kwh")
+with col2:
+    st.caption("Utilization per day (% of day in a session)")
+    st.bar_chart(history, x="day", y="avg_utilization_pct")
+
+st.caption("Faults per day")
+fcol1, fcol2 = st.columns([2, 1])
+with fcol1:
+    st.bar_chart(history, x="day", y="faults")
+with fcol2:
+    st.metric("Total faults", int(history["faults"].sum()))
+st.dataframe(history, width="stretch")
