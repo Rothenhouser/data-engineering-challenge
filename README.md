@@ -25,7 +25,7 @@ The entire project is set up as a **uv workspace**, where functionality is
 encapsulated into independent Python packages, and deployed locally as one
 **Docker compose** stack.
 
-## Run it
+## Setup
 
 **Prerequisites:**
 
@@ -52,7 +52,7 @@ Postgres.
 (Dagster UI → Jobs → `load_file_job` → Launchpad); the op config path defaults
 to `/app/data/ocpp-data-many-days.txt`.
 
-Ingestion from Postgres into DuckLake runs every 5 minutes, so you may have to
+Ingestion from Postgres into DuckLake runs every minute, so you may have to
 wait or trigger the `archive_job` manually in Dagster. Parsing into sessions and
 analytics then happens automatically (event-driven) — the dashboard's analytics
 page shows results after the first successful run.
