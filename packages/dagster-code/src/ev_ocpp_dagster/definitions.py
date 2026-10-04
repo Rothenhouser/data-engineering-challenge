@@ -41,7 +41,7 @@ from dagster import (
 
 from .analytics import gold_analytics_daily
 from .config import LAKE_CATALOG, LAKE_DATA
-from .dump import raw_events_archive
+from .dump import raw_events, raw_events_archive
 from .loader import historical_file_sensor, load_file_job
 from .partitions import CONTENT_PARTITIONS
 from .session import gold_sessions
@@ -144,7 +144,7 @@ automation_sensor = AutomationConditionSensorDefinition(
 
 
 defs = Definitions(
-    assets=[raw_events_archive, gold_sessions, gold_analytics_daily],
+    assets=[raw_events, raw_events_archive, gold_sessions, gold_analytics_daily],
     jobs=[load_file_job, archive_job, session_job],
     sensors=[
         historical_file_sensor,

@@ -18,7 +18,11 @@ import os
 
 import psycopg
 from dagster import (
+    AssetKey,
+    AssetMaterialization,
     Config,
+    MetadataValue,
+    Output,
     RunConfig,
     RunRequest,
     SensorEvaluationContext,
@@ -40,8 +44,14 @@ class LoadFileConfig(Config):
 
 
 @op
-def load_file_op(context, config: LoadFileConfig) -> None:
-    """Parse one historical file and bulk-append its frames to raw_events."""
+def load_file_op(context, config: LoadFileConfig):
+    """Parse one historical file and bulk-append its frames to raw_events.
+
+    Reports an ``AssetMaterialization`` for the ``raw_events`` landing-zone asset
+    (the Postgres table both ingestion paths write to) so a historical load
+    shows up as a materialization event in Dagster's asset catalog, with the
+    source file and row counts as metadata.
+    """
     rows, skipped = [], 0
     for line in iter_file(config.path):
         row = parse_raw_row(line)
@@ -54,6 +64,16 @@ def load_file_op(context, config: LoadFileConfig) -> None:
         init_schema(conn)
         written = write_raw_events(conn, rows)
     context.log.info("loaded %s: ingested=%d skipped=%d", config.path, written, skipped)
+    yield AssetMaterialization(
+        asset_key=AssetKey("raw_events"),
+        description="Historical file drop appended to the raw_events landing zone.",
+        metadata={
+            "source_file": MetadataValue.path(config.path),
+            "rows_ingested": MetadataValue.int(written),
+            "rows_skipped": MetadataValue.int(skipped),
+        },
+    )
+    yield Output(None)
 
 
 @job

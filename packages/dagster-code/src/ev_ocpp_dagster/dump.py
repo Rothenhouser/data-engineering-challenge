@@ -17,15 +17,28 @@ improvements").
 # AssetExecutionContext type hint on the asset fn, not a stringized annotation.
 
 import polars as pl
-from dagster import AssetExecutionContext, asset
+from dagster import AssetExecutionContext, AssetSpec, asset
 from ev_ocpp_analysis import ARCHIVE_TABLE, connect, replace_partition
 
 from .config import LAKE_CATALOG, LAKE_DATA, PG_URI
 from .partitions import INGESTION_PARTITIONS
 
+# The Postgres ``raw_events`` landing zone, modeled as an external **source
+# asset**: Dagster does not produce it (the stream consumer and the historical
+# loader write it imperatively), it only observes/depends on it. Declaring it as
+# an AssetSpec gives it a node in the asset graph so the archive can list it as
+# an upstream dep and the loader can report materializations against it.
+raw_events = AssetSpec(
+    key="raw_events",
+    group_name="landing",
+    description="Append-only Postgres landing zone for raw OCPP events, written "
+    "by the stream consumer and the historical file loader (external to Dagster).",
+)
+
 
 @asset(
     partitions_def=INGESTION_PARTITIONS,
+    deps=[raw_events],
     group_name="archive",
     description="Immutable DuckLake archive of raw OCPP events, partitioned by "
     "ingestion day. Each run idempotently replaces its day's slice from Postgres.",
