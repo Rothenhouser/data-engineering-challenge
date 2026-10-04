@@ -29,12 +29,12 @@ encapsulated into independent Python packages, and deployed locally as one
 
 **Prerequisites:**
 
-- Docker + docker-compose (invoked here as `wsl sudo docker` on Windows/WSL).
+- Docker + docker-compose.
 - [`uv`](https://docs.astral.sh/uv/) for Python dependencies.
 
 ```bash
 uv sync --all-packages --all-groups
-wsl sudo docker compose -f deploy/docker-compose.yml up --build -d
+docker compose -f deploy/docker-compose.yml up --build -d
 uv run poe bootstrap   # DB setup — only once
 ```
 
