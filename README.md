@@ -87,11 +87,15 @@ Local dashboard dev (hot reload) against the containerized Postgres:
     INSTALL ducklake; LOAD ducklake;
     SET TimeZone = 'UTC';
     ATTACH 'ducklake:data/lake/catalog.ducklake' AS lake
-      (DATA_PATH 'data/lake/data', OVERRIDE_DATA_PATH TRUE);
+      (DATA_PATH 'data/lake/data', OVERRIDE_DATA_PATH TRUE, READ_ONLY);
+
     SELECT * FROM lake.main.gold_analytics_daily;
     -- table list + per-table file counts (file_count 0 == inlined):
     SELECT * FROM ducklake_table_info('lake');
     ```
+
+    `READ_ONLY` lets you inspect safely while the app (Dagster / dashboard) may
+    hold the catalog open; drop it if you want to write.
 
     Add the DuckDB web UI with `duckdb -ui` instead of `duckdb` (opens a browser
     UI; run the same SQL there).
