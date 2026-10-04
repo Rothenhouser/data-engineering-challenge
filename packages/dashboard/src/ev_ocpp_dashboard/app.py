@@ -16,7 +16,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import polars as pl
-import psycopg
 import streamlit as st
 from ev_ocpp_analysis import (
     SESSIONS_TABLE,
@@ -24,7 +23,6 @@ from ev_ocpp_analysis import (
     read_gold_table,
     read_measurand,
     read_recent_window_postgres,
-    read_sim_control,
     reconstruct_sessions,
 )
 from streamlit_autorefresh import st_autorefresh
@@ -45,16 +43,6 @@ def _recent_window(window_minutes: int) -> pl.DataFrame:
     return read_recent_window_postgres(PG_URI, since)
 
 
-@st.cache_data(ttl=5)
-def _clock_mode() -> str:
-    """Current clock mode from sim_control ('data' or 'wall')."""
-    try:
-        with psycopg.connect(PG_URI, connect_timeout=5) as conn:
-            return read_sim_control(conn).get("clock_mode", "data")
-    except psycopg.Error:
-        return "data"
-
-
 def _payload_time(payload: dict[str, Any]) -> datetime | None:
     ts = payload.get("timestamp") or payload.get("currentTime")
     if isinstance(ts, str) and ts:
@@ -66,16 +54,15 @@ def _payload_time(payload: dict[str, Any]) -> datetime | None:
 
 
 def _sim_now(events: pl.DataFrame) -> datetime:
-    """The 'now' the live fold should use.
+    """The 'now' the live fold should use: the newest payload timestamp.
 
-    The simulated feed replays historical payload timestamps (e.g. 2025) while
-    rows are *ingested* at today's wall-clock time, so wall-clock is the wrong
-    reference. In ``data`` mode (default) use the newest payload timestamp in the
-    window — the same time base as the session start/stop boundaries — so running
-    duration, energy and active/incomplete status are all correct. In ``wall``
-    mode use real time.
+    The feed replays historical payload timestamps (e.g. 2025) while rows are
+    *ingested* at today's wall-clock time, so wall-clock is the wrong reference.
+    Using the newest payload timestamp in the window — the same time base as the
+    session start/stop boundaries — keeps running duration, energy and
+    active/incomplete status correct.
     """
-    if _clock_mode() == "wall" or events.is_empty():
+    if events.is_empty():
         return datetime.now(UTC)
     times = [
         t

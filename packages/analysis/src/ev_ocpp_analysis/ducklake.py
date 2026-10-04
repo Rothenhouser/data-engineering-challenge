@@ -131,6 +131,29 @@ def append_frame(con: duckdb.DuckDBPyConnection, table: str, df: pl.DataFrame) -
         con.execute(f"CREATE TABLE {table} AS SELECT * FROM df")
 
 
+def replace_partition(
+    con: duckdb.DuckDBPyConnection,
+    table: str,
+    day_col: str,
+    day: str,
+    df: pl.DataFrame,
+) -> None:
+    """Idempotently replace one day's rows in a DuckLake table.
+
+    Deletes the existing rows whose ``day_col::date`` equals ``day`` (an ISO
+    ``YYYY-MM-DD`` string) and inserts ``df`` in their place, so re-running a
+    partition is a no-op on row count. Creates the table on first write. Used by
+    the partitioned archive (``day_col='ingest_ts'``) and gold assets
+    (``day_col='start_time'``). ``df`` is bound by name in the SQL.
+    """
+    df = _jsonify_payload(df)  # noqa: F841 - referenced by name in SQL below
+    if not _table_exists(con, table):
+        con.execute(f"CREATE TABLE {table} AS SELECT * FROM df")
+        return
+    con.execute(f"DELETE FROM {table} WHERE {day_col}::date = ?", [day])
+    con.execute(f"INSERT INTO {table} BY NAME SELECT * FROM df")
+
+
 def replace_table(con: duckdb.DuckDBPyConnection, table: str, df: pl.DataFrame) -> None:
     """Fully (re)create a DuckLake table from a Polars frame.
 

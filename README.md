@@ -26,10 +26,12 @@ in-process (no service), on the local filesystem (no object store), under
   schema calls each unit a charger (OCPP: charge point), identified by
   `charger_id`; a charger may expose several connectors.
 - **Postgres** `raw_events`: durable, append-only landing zone (psycopg, no ORM).
-- **Dagster jobs**: dump-to-DuckLake (archive), session reconstruction (gold
-  sessions + per-session readings), daily analytics (energy / utilization / faults).
+- **Dagster jobs**: dump-to-DuckLake (archive, partitioned by ingestion day),
+  session reconstruction (gold sessions + per-session readings, partitioned by
+  content day), daily analytics (energy / utilization / faults, content-day
+  partitioned, eager automation). See "Partitioning" below.
 - **Streamlit dashboard**: live charger overview, raw-data inspector, session
-  explorer with charging curves, fleet analytics, and a simulation control page.
+  explorer with charging curves, and fleet analytics.
 - All business logic is Polars; the only SQL is parameterized inserts, ConnectorX
   live reads, and DuckLake ATTACH / CREATE / INSERT / SELECT.
 
@@ -64,6 +66,29 @@ because the session key only exists once the opening `StartTransaction` arrives.
   timestamp, power/SoC/register), each reading linked by `session_id`. Daily
   analytics then roll sessions up per `(charger_id, connector_id, day)`.
 
+## Partitioning
+
+The pipeline uses two independent daily grains so each run reprocesses a bounded
+slice instead of everything:
+
+- **Raw archive — ingestion day.** `raw_events_archive` is partitioned by
+  `ingest_ts` (real wall-clock), open-ended from `2026-10-01`. `archive_schedule`
+  materializes the current day's partition every 5 minutes; each run idempotently
+  replaces that day's slice (delete-day-then-insert), so re-runs never duplicate.
+- **Gold — content day.** `gold_sessions` and `gold_analytics_daily` are
+  partitioned by *content day* (session `start_time`), a static range covering
+  the sample data (`2025-08-20` … `2025-08-31`).
+- **Fan-out.** An asset sensor on `raw_events_archive` finds the content days a
+  newly-archived ingestion day touched (distinct `StartTransaction` payload-day,
+  clamped to the content range) and requests `session_job` for each. Analytics is
+  downstream with an eager `AutomationCondition`, so each updated content day
+  re-materializes automatically.
+
+The payoff is that an ingestion day's data only re-processes the content days it
+affects, bounding downstream input size. The current tradeoff (Option C) is that
+`gold_sessions` still reads the *full* archive per run — see "Future
+improvements".
+
 ## Run it
 
 ```bash
@@ -72,7 +97,11 @@ wsl sudo docker compose -f deploy/docker-compose.yml up --build
 
 - Dashboard: http://localhost:8501 · Dagster UI: http://localhost:3000 · Postgres: `localhost:5432`
 - The stream replays `many-chargers.txt`; drop `many-days.txt` is loaded by the
-  Dagster sensor. Trigger `session_job` then `analytics_job` to populate gold.
+  Dagster file sensor. Gold then populates on its own: `archive_schedule`
+  materializes the current day's `raw_events_archive` partition every 5 minutes,
+  a sensor fans `session_job` out to each content day that archived data
+  touched, and `gold_analytics_daily` re-materializes those days eagerly. No
+  manual job triggering needed (see "Partitioning").
 - The DuckLake extension is a DuckDB native extension (not a pip package): the
   containers fetch it over the network on first run via `INSTALL ducklake` and
   cache it. First boot therefore needs outbound network; it is not baked into
@@ -94,7 +123,8 @@ Local dashboard dev (hot reload) against the containerized Postgres:
 - **Status** is explicit: `completed` / `active` / `incomplete`; duration is null
   until a StopTransaction closes the session.
 - **Live clock**: the feed replays historical timestamps, so live views derive
-  "now" from the newest payload time (toggleable on the Simulation page).
+  "now" from the newest payload time in the window (not real wall-clock), keeping
+  running duration and active/incomplete status correct.
 - **Sites**: sessions and daily analytics carry a nullable `site_id`, populated
   from an optional `charger_id -> site_id` map (`OCPP_SITE_MAP` env, JSON); unset
   means `None`. Ready for multi-site rollups.
@@ -133,5 +163,29 @@ Local dashboard dev (hot reload) against the containerized Postgres:
     Add the DuckDB web UI with `duckdb -ui` instead of `duckdb` (opens a browser
     UI; run the same SQL there).
 - **Deferred for production** (see design doc): object-store DuckLake data path,
-  partitioned archive, managed Postgres, separate Dagster metadata DB, and
-  source-level dedup.
+  managed Postgres, a separate Dagster metadata DB, and source-level dedup.
+
+## Future improvements
+
+**Two-stage sessionization.** Today `gold_sessions` reads the *entire* archive on
+every content-day run (Option C): correctness is trivial — a content day is a
+pure function of all events, so late or batch data arriving for any past day is
+handled — but the full-archive read does not scale as the archive grows.
+
+The tension is intrinsic: the grain that is efficient to ingest (ingestion day)
+is not the grain that is correct for sessions (content day), and a session is a
+span that can straddle both. The elegant fix is a map/reduce shuffle:
+
+1. **Map (per ingestion day).** Extract session-relevant events from the day's
+   slice and tag each with the content day of its transaction's
+   `StartTransaction`, writing a content-day-partitioned intermediate. One
+   ingestion day fans out into several content-day partitions.
+2. **Reduce (per content day).** Fold only that content day's tagged events and
+   upsert `gold_sessions`. Both stages read a bounded slice, and late-arriving
+   data re-triggers only the content partitions it touches.
+
+The subtlety is a session whose `StartTransaction` and `StopTransaction` are
+ingested on different days: tagging both frames to the start day needs a small
+persistent `transaction -> start_day` lookup (keyed by `charger_id +
+transactionId`), the only piece of carried state in the system. Deferred because
+the demonstrator's archive is small enough that the full read is fine.

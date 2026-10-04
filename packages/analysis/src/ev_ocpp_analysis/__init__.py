@@ -12,6 +12,7 @@ from .ducklake import (
     catalog_overview,
     connect,
     read_gold_table,
+    replace_partition,
     replace_table,
 )
 from .measurands import Measurand, read_measurand
@@ -36,12 +37,6 @@ from .sessionization import (
     reconstruct_sessions,
     reconstruct_sessions_and_readings,
 )
-from .sim_control import (
-    CREATE_SIM_CONTROL_SQL,
-    init_sim_control,
-    read_sim_control,
-    write_sim_control,
-)
 from .sites import site_for
 
 __all__ = [
@@ -64,6 +59,7 @@ __all__ = [
     "read_recent_window_postgres",
     "connect",
     "append_frame",
+    "replace_partition",
     "replace_table",
     "read_gold_table",
     "catalog_overview",
@@ -77,8 +73,4 @@ __all__ = [
     "init_schema",
     "write_raw_event",
     "write_raw_events",
-    "CREATE_SIM_CONTROL_SQL",
-    "init_sim_control",
-    "read_sim_control",
-    "write_sim_control",
 ]
