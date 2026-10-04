@@ -43,7 +43,7 @@ services:
     environment:
       OCPP_PG_URI: *pg_uri
       OCPP_DATA_DIR: /app/data
-      OCPP_LAKE_CATALOG: /app/data/lake/catalog.ducklake
+      OCPP_LAKE_CATALOG: "postgres:dbname=ducklake_catalog host=postgres user=ocpp password=ocpp"
       OCPP_LAKE_DATA: /app/data/lake/data
       DAGSTER_HOME: /app/dagster_home
     volumes:
@@ -79,7 +79,7 @@ services:
       ev-ocpp-dashboard --server.address=0.0.0.0 --server.port=8501
     environment:
       OCPP_PG_URI: *pg_uri
-      OCPP_LAKE_CATALOG: /app/data/lake/catalog.ducklake
+      OCPP_LAKE_CATALOG: "postgres:dbname=ducklake_catalog host=postgres user=ocpp password=ocpp"
       OCPP_LAKE_DATA: /app/data/lake/data
     volumes:
       - ../data:/app/data

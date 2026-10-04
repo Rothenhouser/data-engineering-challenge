@@ -17,3 +17,6 @@ data/*.txt
 .ruff_cache
 
 .hypothesis
+data/lake/
+.worktrees/
+.agents/

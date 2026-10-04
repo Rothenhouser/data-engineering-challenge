@@ -36,13 +36,14 @@ _fmt = "ruff format ."
 _lint_fix = "ruff check --fix ."
 
 # Run the dashboard locally with hot reload, against the containerized Postgres
-# (needs `docker compose up postgres`, which publishes localhost:5432). Reads
-# cold+gold from the local DuckLake under ./data/lake. Reruns on file save.
+# (needs `docker compose up postgres`, which publishes localhost:5432). The
+# DuckLake catalog lives in the shared Postgres (ducklake_catalog DB; run
+# `poe bootstrap` once); table data reads from ./data/lake/data. Reruns on save.
 [tool.poe.tasks.dashboard]
 cmd = "streamlit run packages/dashboard/src/ev_ocpp_dashboard/app.py --server.runOnSave=true"
 [tool.poe.tasks.dashboard.env]
 OCPP_PG_URI = { default = "postgresql://ocpp:ocpp@localhost:5432/ocpp" }
-OCPP_LAKE_CATALOG = { default = "data/lake/catalog.ducklake" }
+OCPP_LAKE_CATALOG = { default = "postgres:dbname=ducklake_catalog host=localhost user=ocpp password=ocpp" }
 OCPP_LAKE_DATA = { default = "data/lake/data" }
 
 [tool.ruff]

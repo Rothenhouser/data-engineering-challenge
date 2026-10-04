@@ -2,9 +2,13 @@
 
 DuckLake is a lakehouse format: table data stays in Parquet files, while all
 metadata (snapshots, schema, file lists, column statistics) lives in a SQL
-catalog. It is **embedded** — the DuckDB ``ducklake`` extension loads in-process,
-so there is no separate service or container. For this prototype the catalog is a
-local DuckDB file and the data is a local directory on the shared volume.
+catalog. The DuckDB ``ducklake`` extension loads in-process, so there is no
+separate lake service. The catalog metadata is kept in the shared Postgres
+service (a dedicated ``ducklake_catalog`` database) so the dashboard, Dagster,
+and stream can attach concurrently without the single-writer file-lock
+contention of an embedded DuckDB catalog file; the table data stays as Parquet
+on a local directory on the shared volume. A local DuckDB catalog file is still
+supported (used by the tests) when ``catalog_path`` is a plain file path.
 
 This module centralizes the one way callers open a DuckLake connection, so the
 Dagster assets (writers) and the dashboard / archive reader (readers) all attach
@@ -39,33 +43,56 @@ READINGS_TABLE = f"{CATALOG_ALIAS}.{SCHEMA}.gold_session_readings"
 ANALYTICS_TABLE = f"{CATALOG_ALIAS}.{SCHEMA}.gold_analytics_daily"
 
 
+def _is_postgres_catalog(catalog: str) -> bool:
+    """True if ``catalog`` is a Postgres-backed DuckLake catalog spec.
+
+    A Postgres catalog is given as a ``postgres:`` connection string (e.g.
+    ``postgres:dbname=ducklake_catalog host=localhost``); anything else is
+    treated as a local DuckDB catalog file path.
+    """
+    return catalog.startswith("postgres:")
+
+
 @contextmanager
 def connect(catalog_path: str, data_path: str) -> Iterator[duckdb.DuckDBPyConnection]:
     """Open a DuckDB connection with the DuckLake catalog attached as ``lake``.
 
-    ``catalog_path`` is a local DuckDB catalog file (e.g.
-    ``data/lake/catalog.ducklake``); ``data_path`` is the local directory that
-    holds the table Parquet files (e.g. ``data/lake/data``). Both parents are
-    created if missing — DuckLake requires the catalog's directory to exist
-    before attaching. A new DuckLake is created automatically if none exists in
-    the catalog, so this doubles as first-time setup.
+    ``catalog_path`` is either a Postgres-backed catalog spec
+    (``postgres:dbname=ducklake_catalog host=localhost ...``) or a local DuckDB
+    catalog file (``data/lake/catalog.ducklake``). ``data_path`` is the local
+    directory that holds the table Parquet files (e.g. ``data/lake/data``).
+
+    A Postgres catalog keeps the metadata in a shared SQL database so multiple
+    clients (dashboard, Dagster, stream) can attach concurrently without the
+    single-writer file-lock contention of the embedded DuckDB catalog. The
+    Parquet table data still lives on the shared ``data_path`` directory. The
+    ``ducklake_catalog`` database must already exist (see ``poe bootstrap``).
+
+    A new DuckLake is created automatically on first attach if the catalog is
+    empty, so this doubles as first-time setup. The data dir is created if
+    missing; for a file catalog its parent dir is created too.
     """
     import duckdb
 
-    os.makedirs(os.path.dirname(catalog_path) or ".", exist_ok=True)
     os.makedirs(data_path, exist_ok=True)
+    pg_catalog = _is_postgres_catalog(catalog_path)
+    if not pg_catalog:
+        os.makedirs(os.path.dirname(catalog_path) or ".", exist_ok=True)
 
     # DuckLake pins the data path in the catalog at creation and rejects a later
-    # attach whose DATA_PATH differs. The same catalog file is reached from
-    # different cwds (a host run vs. the container's /app bind mount), so a stored
-    # absolute path can never match both. OVERRIDE_DATA_PATH tells DuckLake to use
-    # the DATA_PATH supplied now instead of the stored one, making the catalog
+    # attach whose DATA_PATH differs. The same catalog is reached from different
+    # cwds (a host run vs. the container's /app bind mount), so a stored absolute
+    # path can never match both. OVERRIDE_DATA_PATH tells DuckLake to use the
+    # DATA_PATH supplied now instead of the stored one, making the catalog
     # portable across environments. The trailing separator keeps it a directory.
     data_path = os.path.join(data_path, "")
 
     con = duckdb.connect()
     try:
         con.execute("INSTALL ducklake; LOAD ducklake;")
+        if pg_catalog:
+            # The Postgres catalog backend needs the duckdb `postgres` extension.
+            con.execute("INSTALL postgres; LOAD postgres;")
         # Pin the session timezone to UTC. DuckDB renders TIMESTAMPTZ values in
         # the session's TimeZone, which otherwise defaults to the host's local
         # zone (e.g. Europe/Berlin) — so the same UTC instant would read back
