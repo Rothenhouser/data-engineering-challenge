@@ -1,6 +1,6 @@
 """Manual one-time bootstrap for the Postgres-backed cold+gold DuckLake.
 
-First-time setup is manual. The DuckLake catalog metadata lives in a dedicated
+DuckLake catalog metadata lives in a dedicated
 ``ducklake_catalog`` database inside the existing Postgres service (so the
 dashboard, Dagster and stream share one multi-client-safe catalog instead of
 contending on an embedded DuckDB file). This script:
@@ -14,8 +14,6 @@ contending on an embedded DuckDB file). This script:
    catalog — empty on a fresh bootstrap, because the archive and gold tables are
    created lazily by the first Dagster write (``append_frame`` / ``replace_table``).
 
-Run it with ``uv run poe bootstrap`` (or ``python -m ev_ocpp_dagster.bootstrap``)
-once before running the Dagster pipeline.
 """
 
 from __future__ import annotations

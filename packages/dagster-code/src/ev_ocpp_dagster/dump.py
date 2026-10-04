@@ -1,20 +1,11 @@
-"""Dump-to-archive asset: archive one ingestion day's landing rows to DuckLake.
+"""Dump-to-archive asset: archive one ingestion day's rows to DuckLake.
 
-The archive is a DuckLake asset partitioned by **ingestion day** (the real
-wall-clock ``ingest_ts``). Materializing a partition reads that day's slice from
-Postgres (``ingest_ts`` in ``[day, day+1)``) and writes it into the archive table
-for that day via ``replace_partition`` — a delete-day-then-insert, so re-running
-the current day's partition every few minutes never duplicates rows
-(Requirements 3.1-3.3). Archived data is otherwise immutable: a given day is only
-ever rewritten by re-reading that same day's landing rows (3.6).
-
-Partitioning by ingestion day caps the per-run input to one day of data and lets
-downstream jobs reprocess only the days that changed (see README "Future
-improvements").
+The archive is a DuckLake asset partitioned by **ingestion day**. Materializing a
+partition reads that day's slice from Postgres (``ingest_ts`` in ``[day, day+1)``)
+and writes it into the archive table for that day via ``replace_partition`` — a
+delete-day-then-insert, so re-running the current day's partition every few
+minutes never duplicates rows.
 """
-
-# NOTE: no `from __future__ import annotations` here — Dagster validates the real
-# AssetExecutionContext type hint on the asset fn, not a stringized annotation.
 
 import polars as pl
 from dagster import AssetExecutionContext, AssetSpec, asset

@@ -2,15 +2,10 @@
 
 Models "a charger onboarded with backfilled data". The sensor scans the watched
 directory; a file is new when its filename is not in the Scan_Cursor (the sensor
-cursor), so a re-dropped file under a new name is loaded again by design
-(Requirements 1.2, 2.9). The job parses the file through the shared library and
+cursor). The job parses the file through the shared library and
 bulk-INSERTs raw events into the same append-only ``raw_events`` table the stream
-writes to (Requirements 1.4, 2.8). If Postgres is unreachable the run fails
-visibly in Dagster (Requirement 12.3).
+writes to.
 """
-
-# NOTE: no `from __future__ import annotations` here — Dagster's Config inference
-# needs the real LoadFileConfig type, not a stringized annotation.
 
 import glob
 import json

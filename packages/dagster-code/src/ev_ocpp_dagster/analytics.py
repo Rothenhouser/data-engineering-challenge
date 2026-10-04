@@ -1,24 +1,3 @@
-"""Analytics asset: roll one content day's gold sessions into daily stats.
-
-Partitioned by content day (session start-time day) and driven by an eager
-automation condition, so when ``gold_sessions`` materializes a content-day
-partition this asset re-materializes the same day automatically.
-
-Reads this day's gold sessions and the raw DuckLake archive (for
-StatusNotification fault counts), computes per-``(charger_id, connector_id, day)``
-rows via the shared ``compute_daily_stats``, keeps only this partition's day, and
-writes them into the ``gold_analytics_daily`` table for the day via
-``replace_partition`` — a pure function of its inputs, so re-runs are
-reproducible.
-
-Depends on ``gold_sessions`` (reads the gold sessions table) and
-``raw_events_archive`` (reads the archive for faults); both via ``deps`` since
-the data flows through shared DuckLake tables, not a Dagster IO manager.
-"""
-
-# NOTE: no `from __future__ import annotations` here — Dagster validates the real
-# AssetExecutionContext type hint on the asset fn, not a stringized annotation.
-
 import polars as pl
 from dagster import AssetExecutionContext, AutomationCondition, asset
 from ev_ocpp_analysis import (
@@ -32,17 +11,18 @@ from ev_ocpp_analysis import (
 )
 
 from .config import LAKE_CATALOG, LAKE_DATA
-from .dump import raw_events_archive
 from .partitions import CONTENT_PARTITIONS
 from .session import gold_sessions
 
 
 @asset(
-    deps=[gold_sessions, raw_events_archive],
+    deps=[
+        gold_sessions,
+        # Does depend on the raw archive, but listing it as a dep (or via a
+        # partition mapping) prevents eager automation. TODO: a separate
+        # content-partitioned asset for raw faults, then add raw_events_archive.
+    ],
     partitions_def=CONTENT_PARTITIONS,
-    # eager, but without the default "latest time window" gate — the content
-    # partitions are historical (2025-08), so that gate would permanently skip
-    # them. We want any updated content day re-materialized regardless of age.
     automation_condition=AutomationCondition.eager().without(
         AutomationCondition.in_latest_time_window()
     ),
@@ -51,7 +31,7 @@ from .session import gold_sessions
     "from that day's gold sessions and archive fault events.",
 )
 def gold_analytics_daily(context: AssetExecutionContext) -> None:
-    """Roll this content day's sessions up into per-connector daily rows."""
+    """Aggregate this content day's sessions into per-connector rows."""
     day = context.partition_key  # ISO 'YYYY-MM-DD'
     sessions = read_gold_table(LAKE_CATALOG, LAKE_DATA, SESSIONS_TABLE)
     day_sessions = (

@@ -21,6 +21,6 @@ from dagster import DailyPartitionsDefinition
 # materialize today.
 INGESTION_PARTITIONS = DailyPartitionsDefinition(start_date="2026-10-01", end_offset=1)
 
-# Content-day partitions for gold: session start-time day. Static closed range
-# bounding the sample data (end is exclusive, so the last partition is 08-31).
+# Content-day partitions for gold: session start-time day.
+# Hard-coded for demo just to make UI cleaner.
 CONTENT_PARTITIONS = DailyPartitionsDefinition(start_date="2025-08-20", end_date="2025-09-01")

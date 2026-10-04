@@ -1,14 +1,3 @@
-"""Shared paths and connection config for the Dagster code location.
-
-All values come from environment variables so the same code runs locally and in
-the docker-compose topology against the shared volume.
-
-The cold archive and gold layers live in a DuckLake whose catalog metadata is
-kept in the shared Postgres service (``LAKE_CATALOG`` is the DuckLake
-``postgres:`` catalog spec) and whose table Parquet data lives under
-``LAKE_DATA`` (``data/lake/data`` on the shared volume).
-"""
-
 from __future__ import annotations
 
 import os

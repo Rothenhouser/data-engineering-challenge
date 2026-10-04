@@ -2,24 +2,19 @@
 
 Reads the **full** DuckLake archive, runs the shared sessionization fold, then
 writes only the sessions whose ``start_time`` falls on this asset's content-day
-partition into the gold tables (Requirements 4.1, 4.7, 7.1): ``gold_sessions``
+partition into the gold tables: ``gold_sessions``
 (session facts) and ``gold_session_readings`` (the per-session charging curve).
 
-Reading the whole archive each run is deliberate for the demonstrator (Option C
-— see README "Future improvements"): correctness is trivial (a content day is a
-pure function of all events, so late/batch data arriving for any past day is
-handled), at the cost of re-folding the full archive. The per-partition write is
+Reading the whole archive each run is deliberate for the demonstrator (see the
+README "Future improvements"): correctness is trivial (a content day is a pure
+function of all events, so late/batch data arriving for any past day is handled),
+at the cost of re-folding the full archive. The per-partition write is
 idempotent: the day's sessions are replaced, and that day's readings are deleted
 by ``session_id`` before re-insert, so re-running a content day never
 duplicates. Gold is derived solely from the archive, so a re-run reproduces
-field-for-field equal facts (Requirements 9.1-9.3).
+field-for-field equal facts.
 
-Depends on ``raw_events_archive`` (reads its DuckLake table, so declared with
-``deps`` — data flows through shared DuckLake tables, not a Dagster IO manager).
 """
-
-# NOTE: no `from __future__ import annotations` here — Dagster validates the real
-# AssetExecutionContext type hint on the asset fn, not a stringized annotation.
 
 import polars as pl
 from dagster import AssetExecutionContext, asset

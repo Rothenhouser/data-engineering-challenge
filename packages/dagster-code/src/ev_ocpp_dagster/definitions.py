@@ -1,25 +1,3 @@
-"""The ``ev_ocpp`` Dagster code location.
-
-Two partitioned grains split the pipeline (see README "Future improvements"):
-
-    raw_events_archive            (ingestion-day partitions)
-       └─> gold_sessions          (content-day partitions)
-             └─> gold_analytics_daily  (content-day, eager automation)
-
-Jobs:
-- ``archive_job`` materializes the current ingestion-day partition of
-  ``raw_events_archive`` on a 5-minute schedule.
-- ``session_job`` materializes one content-day partition of ``gold_sessions``.
-- ``archive_to_sessions_sensor`` watches ``raw_events_archive`` materializations
-  and requests ``session_job`` runs for every content day the newly-archived
-  ingestion day touched (a fan-out), clamped to the content partition range.
-- ``gold_analytics_daily`` carries an eager ``AutomationCondition``, so it
-  re-materializes a content day automatically once its sessions update; an
-  automation-condition sensor drives it.
-
-The loader keeps its own file-drop sensor + op job as the ingestion entry point.
-"""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -135,7 +113,6 @@ def archive_to_sessions_sensor(context: SensorEvaluationContext, asset_event: Ev
         )
 
 
-# Drives the eager AutomationCondition on gold_analytics_daily.
 automation_sensor = AutomationConditionSensorDefinition(
     name="automation_sensor",
     target=[gold_analytics_daily],
