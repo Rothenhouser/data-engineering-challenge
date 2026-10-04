@@ -13,9 +13,10 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from typing import Any
 
 import psycopg
+
+from .parsing import RawRow
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS raw_events (
@@ -41,19 +42,20 @@ def init_schema(conn: psycopg.Connection) -> None:
     conn.commit()
 
 
-def _params(row: dict[str, Any], ingest_ts: datetime) -> tuple:
+def _params(row: RawRow, ingest_ts: datetime) -> tuple:
+    mapping = row.as_row()
     return (
-        row["station_id"],
-        row["msg_type"],
-        row["unique_id"],
-        row.get("action"),
-        json.dumps(row.get("payload") or {}),
+        mapping["station_id"],
+        mapping["msg_type"],
+        mapping["unique_id"],
+        mapping.get("action"),
+        json.dumps(mapping.get("payload") or {}),
         ingest_ts,
     )
 
 
 def write_raw_event(
-    conn: psycopg.Connection, row: dict[str, Any], ingest_ts: datetime | None = None
+    conn: psycopg.Connection, row: RawRow, ingest_ts: datetime | None = None
 ) -> None:
     """Append one RawEvent, committed per-message for crash safety (2.6, 2.7)."""
     conn.execute(_INSERT_SQL, _params(row, ingest_ts or datetime.now(UTC)))
@@ -61,7 +63,7 @@ def write_raw_event(
 
 
 def write_raw_events(
-    conn: psycopg.Connection, rows: Iterable[dict[str, Any]], ingest_ts: datetime | None = None
+    conn: psycopg.Connection, rows: Iterable[RawRow], ingest_ts: datetime | None = None
 ) -> int:
     """Append many RawEvents in one parameterized batch; returns the row count."""
     ts = ingest_ts or datetime.now(UTC)

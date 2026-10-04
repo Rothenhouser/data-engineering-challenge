@@ -19,6 +19,7 @@ import os
 import psycopg
 from dagster import (
     Config,
+    Field,
     RunConfig,
     RunRequest,
     SensorEvaluationContext,
@@ -27,7 +28,7 @@ from dagster import (
     op,
     sensor,
 )
-from ev_ocpp_analysis import init_schema, iter_file, parse_line, to_raw_event_row, write_raw_events
+from ev_ocpp_analysis import init_schema, iter_file, parse_raw_row, write_raw_events
 
 from .config import DATA_DIR, PG_URI
 
@@ -36,7 +37,7 @@ _INPUT_GLOB = "ocpp-data-*.txt"
 
 
 class LoadFileConfig(Config):
-    path: str
+    path: Field(str, default_value='/app/data/ocpp-data-many-chargers.txt')
 
 
 @op
@@ -44,12 +45,12 @@ def load_file_op(context, config: LoadFileConfig) -> None:
     """Parse one historical file and bulk-append its frames to raw_events."""
     rows, skipped = [], 0
     for line in iter_file(config.path):
-        event = parse_line(line)
-        if event is None:
+        row = parse_raw_row(line)
+        if row is None:
             if line.strip():
                 skipped += 1
             continue
-        rows.append(to_raw_event_row(event))
+        rows.append(row)
     with psycopg.connect(PG_URI) as conn:  # fails the run if unreachable (12.3)
         init_schema(conn)
         written = write_raw_events(conn, rows)

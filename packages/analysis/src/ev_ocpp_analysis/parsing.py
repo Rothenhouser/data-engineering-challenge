@@ -1,4 +1,4 @@
-"""Parse raw OCPP log lines into structured records.
+"""Parse raw OCPP log lines into the raw-landing storage shape.
 
 Each line is one OCPP-J message `stationId : [...]`:
     chargerN : [2, "<UniqueId>", "<Action>", {payload}]              # Call
@@ -8,16 +8,21 @@ Each line is one OCPP-J message `stationId : [...]`:
 arr[0] is the MessageTypeId (2/3/4); arr[1] is the UniqueId, used only to match a
 response to its request (a CallResult reuses its Call's UniqueId). UniqueId is
 unique per sender+connection, NOT globally — do not use it as a row key.
+
+The parser produces exactly the five raw-landing columns both ingestion paths
+persist (``station_id``, ``msg_type``, ``unique_id``, ``action``, ``payload``).
+``payload`` is carried through AS-IS; no convenience fields are lifted into
+columns and no MeterValues pivot is performed — those are derived later by the
+sessionization fold. ``event_id`` and ``ingest_ts`` are supplied by the
+persistence layer at write time, so they are not part of :class:`RawRow`.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, field
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
-
-from .measurands import Measurand
 
 # OCPP message type ids
 CALL = 2  # request: [2, id, action, payload]
@@ -25,30 +30,30 @@ CALL_RESULT = 3  # response: [3, id, payload]
 CALL_ERROR = 4  # error response: [4, id, errorCode, errorDescription, details]
 
 
-@dataclass
-class ParsedEvent:
+@dataclass(slots=True, frozen=True)
+class RawRow:
+    """The five raw-landing storage columns, carried through AS-IS.
+
+    ``action`` is the OCPP Action for a Call and ``None`` for a CallResult or
+    CallError. ``event_id`` and ``ingest_ts`` are NOT held here — the persistence
+    layer supplies them at write time.
+    """
+
     station_id: str
     msg_type: int
     unique_id: str  # request-correlation id; unique per sender+connection, not global
     action: str | None  # None for CallResults/CallErrors
     payload: dict[str, Any]
-    # Common fields lifted from the payload when present
-    connector_id: int | None = None
-    transaction_id: int | None = None
-    timestamp: str | None = None
-    # Pivoted MeterValues measurands: measurand -> float value
-    measurands: dict[str, float] = field(default_factory=dict)
-    meter_context: str | None = None
-    # CallError only
-    error_code: str | None = None
-    error_description: str | None = None
 
-
-@dataclass
-class ParseStats:
-    total: int = 0
-    parsed: int = 0
-    skipped: int = 0
+    def as_row(self) -> dict[str, Any]:
+        """Project onto the storage-column mapping the pg writers consume."""
+        return {
+            "station_id": self.station_id,
+            "msg_type": self.msg_type,
+            "unique_id": self.unique_id,
+            "action": self.action,
+            "payload": self.payload,
+        }
 
 
 def _split_line(line: str) -> tuple[str, str] | None:
@@ -63,29 +68,8 @@ def _split_line(line: str) -> tuple[str, str] | None:
     return station, body
 
 
-def _pivot_meter_values(payload: dict[str, Any]) -> tuple[dict[str, float], str | None, str | None]:
-    """Flatten the first meterValue entry into {measurand: value}, plus its
-    timestamp and sampling context."""
-    measurands: dict[str, float] = {}
-    ts: str | None = None
-    context: str | None = None
-    meter_values = payload.get("meterValue") or []
-    if not meter_values:
-        return measurands, ts, context
-    first = meter_values[0]
-    ts = first.get("timestamp")
-    for sv in first.get("sampledValue", []):
-        name = sv.get("measurand", Measurand.ENERGY_REGISTER.value)
-        context = context or sv.get("context")
-        try:
-            measurands[name] = float(sv["value"])
-        except KeyError, TypeError, ValueError:
-            continue
-    return measurands, ts, context
-
-
-def parse_line(line: str) -> ParsedEvent | None:
-    """Parse one raw line. Return None if it is blank or malformed."""
+def parse_raw_row(line: str) -> RawRow | None:
+    """Parse one raw line into a :class:`RawRow`. Return None if blank/malformed."""
     line = line.strip()
     if not line:
         return None
@@ -103,8 +87,6 @@ def parse_line(line: str) -> ParsedEvent | None:
     msg_type = arr[0]
     unique_id = str(arr[1])
     action = None
-    error_code = None
-    error_description = None
 
     if msg_type == CALL and len(arr) >= 4:
         action = arr[2]
@@ -112,50 +94,17 @@ def parse_line(line: str) -> ParsedEvent | None:
     elif msg_type == CALL_RESULT:
         payload = arr[2] if isinstance(arr[2], dict) else {}
     elif msg_type == CALL_ERROR and len(arr) >= 5:
-        error_code = arr[2]
-        error_description = arr[3]
         payload = arr[4] if isinstance(arr[4], dict) else {}
     else:
         return None
 
-    event = ParsedEvent(
+    return RawRow(
         station_id=station,
         msg_type=msg_type,
         unique_id=unique_id,
         action=action,
         payload=payload,
-        connector_id=payload.get("connectorId"),
-        transaction_id=payload.get("transactionId"),
-        timestamp=payload.get("timestamp") or payload.get("currentTime"),
-        error_code=error_code,
-        error_description=error_description,
     )
-
-    if action == "MeterValues":
-        measurands, ts, context = _pivot_meter_values(payload)
-        event.measurands = measurands
-        event.meter_context = context
-        if ts:
-            event.timestamp = ts
-
-    return event
-
-
-def parse_lines(lines: Iterable[str]) -> tuple[list[ParsedEvent], ParseStats]:
-    """Parse an iterable of lines, collecting skip stats."""
-    stats = ParseStats()
-    events: list[ParsedEvent] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        stats.total += 1
-        event = parse_line(line)
-        if event is None:
-            stats.skipped += 1
-            continue
-        stats.parsed += 1
-        events.append(event)
-    return events, stats
 
 
 def iter_file(path: str) -> Iterator[str]:

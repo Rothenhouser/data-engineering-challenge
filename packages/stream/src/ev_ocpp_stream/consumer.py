@@ -26,9 +26,8 @@ from ev_ocpp_analysis import (
     init_schema,
     init_sim_control,
     iter_file,
-    parse_line,
+    parse_raw_row,
     read_sim_control,
-    to_raw_event_row,
     write_raw_event,
 )
 
@@ -65,12 +64,11 @@ def run_stream_consumer(
     log.info("stream consumer started: source=%s delay=%.3fs", source_path, cur_delay)
     try:
         for line in iter_file(source_path):
-            event = parse_line(line)
-            if event is None:
+            row = parse_raw_row(line)
+            if row is None:
                 if line.strip():  # count only non-blank malformed lines
                     stats.skipped += 1
                 continue
-            row = to_raw_event_row(event)
             while True:
                 try:
                     write_raw_event(conn, row)
