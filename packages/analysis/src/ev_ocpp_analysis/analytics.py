@@ -1,10 +1,11 @@
-"""Daily per-charger analytics derived from gold sessions + raw events.
+"""Daily per-connector analytics derived from gold sessions + raw events.
 
 ``compute_daily_stats`` rolls charging sessions up to one row per
-``(charger_id, day)`` and joins in a fault count from the raw ``StatusNotification``
-frames (a fault is any StatusNotification whose ``errorCode`` is not ``NoError``).
+``(charger_id, connector_id, day)`` and joins in a fault count from the raw
+``StatusNotification`` frames (a fault is any StatusNotification whose
+``errorCode`` is not ``NoError``).
 
-Columns per (charger_id, day):
+Columns per (charger_id, connector_id, day):
 - ``session_count``       — sessions started that day
 - ``total_energy_kwh``    — energy delivered that day
 - ``avg_power`` / ``peak_power``
@@ -24,6 +25,7 @@ from .sites import site_for
 
 DAILY_COLUMNS = (
     "charger_id",
+    "connector_id",
     "site_id",
     "day",
     "session_count",
@@ -35,15 +37,24 @@ DAILY_COLUMNS = (
     "fault_count",
 )
 _SECONDS_PER_DAY = 86400.0
+_FAULT_KEY = ["charger_id", "connector_id", "day"]
 
 
 def _fault_counts(raw_events: pl.DataFrame) -> pl.DataFrame:
-    """Per (charger_id, day) count of StatusNotification faults from raw events.
+    """Per (charger_id, connector_id, day) count of StatusNotification faults.
 
     A fault is a StatusNotification Call whose payload ``errorCode`` is not
-    ``NoError``. The day comes from the payload timestamp.
+    ``NoError``. The connector comes from the payload ``connectorId`` and the day
+    from the payload timestamp.
     """
-    empty = pl.DataFrame(schema={"charger_id": pl.Utf8, "day": pl.Date, "fault_count": pl.UInt32})
+    empty = pl.DataFrame(
+        schema={
+            "charger_id": pl.Utf8,
+            "connector_id": pl.Int64,
+            "day": pl.Date,
+            "fault_count": pl.UInt32,
+        }
+    )
     if raw_events.is_empty():
         return empty
     sn = raw_events.filter(pl.col("action") == "StatusNotification")
@@ -64,22 +75,28 @@ def _fault_counts(raw_events: pl.DataFrame) -> pl.DataFrame:
             except ValueError:
                 day = None
         if day is not None:
-            rows.append({"charger_id": r["charger_id"], "day": day})
+            rows.append(
+                {
+                    "charger_id": r["charger_id"],
+                    "connector_id": payload.get("connectorId"),
+                    "day": day,
+                }
+            )
     if not rows:
         return empty
     return (
-        pl.DataFrame(rows, schema={"charger_id": pl.Utf8, "day": pl.Date})
-        .group_by("charger_id", "day")
+        pl.DataFrame(rows, schema={"charger_id": pl.Utf8, "connector_id": pl.Int64, "day": pl.Date})
+        .group_by("charger_id", "connector_id", "day")
         .agg(pl.len().cast(pl.UInt32).alias("fault_count"))
     )
 
 
 def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.DataFrame:
-    """Compute per-charger daily statistics from sessions + raw events."""
+    """Compute per-connector daily statistics from sessions + raw events."""
     faults = _fault_counts(raw_events)
 
     if sessions.is_empty():
-        # Still surface fault-only days (a charger can fault without a session).
+        # Still surface fault-only days (a connector can fault without a session).
         if faults.is_empty():
             return pl.DataFrame(schema=dict.fromkeys(DAILY_COLUMNS, pl.Null))
         return faults.with_columns(
@@ -95,7 +112,7 @@ def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.
     has_site = "site_id" in sessions.columns
     daily = (
         sessions.with_columns(pl.col("start_time").dt.date().alias("day"))
-        .group_by("charger_id", "day")
+        .group_by("charger_id", "connector_id", "day")
         .agg(
             (pl.col("site_id").first() if has_site else pl.lit(None)).alias("site_id"),
             pl.len().cast(pl.UInt32).alias("session_count"),
@@ -110,7 +127,7 @@ def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.
             .alias("utilization_pct")
         )
     )
-    out = daily.join(faults, on=["charger_id", "day"], how="full", coalesce=True).with_columns(
+    out = daily.join(faults, on=_FAULT_KEY, how="full", coalesce=True).with_columns(
         pl.col("fault_count").fill_null(0),
         pl.col("session_count").fill_null(0),
         pl.col("total_energy_kwh").fill_null(0.0),
@@ -120,4 +137,4 @@ def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.
             pl.col("charger_id").map_elements(site_for, return_dtype=pl.Utf8)
         ),
     )
-    return out.select(DAILY_COLUMNS).sort("day", "charger_id")
+    return out.select(DAILY_COLUMNS).sort("day", "charger_id", "connector_id")

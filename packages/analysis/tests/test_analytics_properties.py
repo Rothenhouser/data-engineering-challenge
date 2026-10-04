@@ -45,6 +45,7 @@ def _faults(charger_fault_days: list[tuple[str, int]]) -> pl.DataFrame:
             "payload": {
                 "errorCode": "InternalError",
                 "status": "Faulted",
+                "connectorId": 1,
                 "timestamp": datetime(2025, 1, 1 + d, 9, tzinfo=UTC).isoformat(),
             },
             "ingest_ts": BASE,
@@ -93,7 +94,7 @@ def test_utilization_within_bounds_and_energy_conserved(sess):
     util = daily["utilization_pct"].drop_nulls().to_list()
     assert all(0.0 <= u <= 100.0 for u in util)
     # Daily energy conserves the input total up to the table's 3-decimal rounding
-    # (one rounded row per charger-day).
+    # (one rounded row per (charger, connector, day); tolerance scales with height).
     diff = abs(daily["total_energy_kwh"].sum() - sessions["total_energy_kwh"].sum())
     assert diff <= 0.0005 * daily.height + 1e-9
 

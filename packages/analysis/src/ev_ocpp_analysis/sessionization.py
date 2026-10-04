@@ -44,6 +44,7 @@ SESSION_COLUMNS = (
 READING_COLUMNS = (
     "session_id",
     "charger_id",
+    "connector_id",
     "timestamp",
     "power_kw",
     "soc_pct",
@@ -52,6 +53,7 @@ READING_COLUMNS = (
 READING_SCHEMA = {
     "session_id": pl.Utf8,
     "charger_id": pl.Utf8,
+    "connector_id": pl.Int64,
     "timestamp": pl.Datetime(time_zone="UTC"),
     "power_kw": pl.Float64,
     "soc_pct": pl.Float64,
@@ -155,7 +157,7 @@ def reconstruct_sessions_and_readings(
 
     Returns ``(sessions, readings)``. ``readings`` has one row per MeterValues
     sample for an open session (the charging curve): ``session_id``,
-    ``charger_id``, ``timestamp``, ``power_kw``, ``soc_pct``,
+    ``charger_id``, ``connector_id``, ``timestamp``, ``power_kw``, ``soc_pct``,
     ``energy_register_kwh``. Each reading links to its session by ``session_id``.
 
     Opens a session on StartTransaction, accumulates Power.Active.Import samples
@@ -273,6 +275,7 @@ def reconstruct_sessions_and_readings(
                     {
                         "session_id": s["session_id"],
                         "charger_id": charger,
+                        "connector_id": s["connector_id"],
                         "timestamp": _metervalue_time(payload) or r["_time"],
                         "power_kw": p,
                         "soc_pct": read_measurand(payload, Measurand.SOC),

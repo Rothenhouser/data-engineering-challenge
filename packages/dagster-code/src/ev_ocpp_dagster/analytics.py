@@ -1,7 +1,7 @@
-"""Analytics asset: roll gold sessions up into daily per-charger statistics.
+"""Analytics asset: roll gold sessions up into daily per-connector statistics.
 
 Reads the gold session facts and the raw DuckLake archive (for fault counts via
-StatusNotification), computes one row per (charger_id, day) with the shared
+StatusNotification), computes one row per (charger_id, connector_id, day) with the shared
 ``compute_daily_stats``, and materializes it to the ``gold_analytics_daily``
 DuckLake table. Pure function of its inputs, so re-runs are reproducible — the
 table is fully replaced each run.
@@ -34,11 +34,11 @@ from .session import gold_sessions
 @asset(
     deps=[gold_sessions, raw_events_archive],
     group_name="gold",
-    description="Daily per-charger analytics rolled up from gold sessions and "
-    "archive fault events; one row per (charger_id, day).",
+    description="Daily per-connector analytics rolled up from gold sessions and "
+    "archive fault events; one row per (charger_id, connector_id, day).",
 )
 def gold_analytics_daily(context: AssetExecutionContext) -> None:
-    """Roll gold sessions up into one row per (charger_id, day)."""
+    """Roll gold sessions up into one row per (charger_id, connector_id, day)."""
     sessions = read_gold_table(LAKE_CATALOG, LAKE_DATA, SESSIONS_TABLE)
     if sessions.is_empty():
         context.log.info("analytics: no gold sessions in %s", SESSIONS_TABLE)
