@@ -161,29 +161,6 @@ def _gold_sessions() -> pl.DataFrame:
     return read_gold_table(LAKE_CATALOG, LAKE_DATA, SESSIONS_TABLE)
 
 
-def _apply_filters(df: pl.DataFrame, chargers: list[str], start, end, ts_col: str) -> pl.DataFrame:
-    if df.is_empty():
-        return df
-    if chargers:
-        df = df.filter(pl.col("charger_id").is_in(chargers))
-    if ts_col in df.columns:
-        # Normalize the column to UTC-aware before comparing with the tz-aware
-        # bounds, whatever tz it carries: a naive column is interpreted as UTC;
-        # an already-aware one (DuckLake may render TIMESTAMPTZ in the session's
-        # local tz) is converted to UTC. Both yield a UTC-aware column so the
-        # comparison never hits a tz-supertype error.
-        col = pl.col(ts_col)
-        if df.schema[ts_col].time_zone is None:
-            col = col.dt.replace_time_zone("UTC")
-        else:
-            col = col.dt.convert_time_zone("UTC")
-        df = df.filter(
-            (col >= datetime.combine(start, datetime.min.time(), UTC))
-            & (col <= datetime.combine(end, datetime.max.time(), UTC))
-        )
-    return df
-
-
 def main() -> None:
     st.set_page_config(page_title="EV OCPP Dashboard", layout="wide")
     st.title("EV charging — OCPP dashboard")
@@ -199,9 +176,6 @@ def main() -> None:
     with st.sidebar:
         st.header("Filters")
         picked = st.multiselect("Charger", chargers)
-        today = datetime.now(UTC).date()
-        start = st.date_input("From", today - timedelta(days=7))
-        end = st.date_input("To", today)
 
         st.header("Auto-refresh")
         auto = st.toggle("Enabled", value=True)
