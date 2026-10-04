@@ -96,12 +96,16 @@ wsl sudo docker compose -f deploy/docker-compose.yml up --build
 ```
 
 - Dashboard: http://localhost:8501 · Dagster UI: http://localhost:3000 · Postgres: `localhost:5432`
-- The stream replays `many-chargers.txt`; drop `many-days.txt` is loaded by the
-  Dagster file sensor. Gold then populates on its own: `archive_schedule`
+- The stream replays `many-chargers.txt` automatically. For the historical
+  `many-days.txt`, **run `load_file_job` manually** from the Dagster UI (Jobs →
+  `load_file_job` → Launchpad), setting the op config path to
+  `/app/data/ocpp-data-many-days.txt`. A file-drop sensor exists but is not relied
+  on for the demonstrator — manual launch is the intended path for now.
+- Once raw events are in Postgres, gold populates on its own: `archive_schedule`
   materializes the current day's `raw_events_archive` partition every 5 minutes,
-  a sensor fans `session_job` out to each content day that archived data
-  touched, and `gold_analytics_daily` re-materializes those days eagerly. No
-  manual job triggering needed (see "Partitioning").
+  a sensor fans `session_job` out to each content day that archived data touched,
+  and `gold_analytics_daily` re-materializes those days eagerly (see
+  "Partitioning").
 - The DuckLake extension is a DuckDB native extension (not a pip package): the
   containers fetch it over the network on first run via `INSTALL ducklake` and
   cache it. First boot therefore needs outbound network; it is not baked into
