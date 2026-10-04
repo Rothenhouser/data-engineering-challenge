@@ -33,6 +33,7 @@ raw_events = AssetSpec(
     group_name="landing",
     description="Append-only Postgres landing zone for raw OCPP events, written "
     "by the stream consumer and the historical file loader (external to Dagster).",
+    kinds={"postgres"},
 )
 
 
@@ -42,6 +43,7 @@ raw_events = AssetSpec(
     group_name="archive",
     description="Immutable DuckLake archive of raw OCPP events, partitioned by "
     "ingestion day. Each run idempotently replaces its day's slice from Postgres.",
+    kinds={"ducklake"},
 )
 def raw_events_archive(context: AssetExecutionContext) -> None:
     """Archive the ingestion-day partition's slice of ``raw_events``."""
