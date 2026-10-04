@@ -4,16 +4,21 @@ Ingestion + analytics prototype for EV charging infrastructure emitting OCPP 1.6
 messages.
 
 - Challenge brief: [`CHALLENGE.md`](CHALLENGE.md)
-- Architecture, design decisions & how it answers the brief: [`docs/ocpp-ingestion-architecture.md`](docs/ocpp-ingestion-architecture.md)
-- How to read the raw data: [`docs/ocpp-message-format.md`](docs/ocpp-message-format.md)
+- Full architecture, design decisions & how it answers the brief: [`docs/architecture.md`](docs/architecture.md)
+- Known shortcuts & path to production: [`docs/technical-debt.md`](docs/technical-debt.md)
+
 
 ## Architecture
 
-Both sources — a live stream and historical file drops — are parsed by one shared
-library (`ev_ocpp_analysis`) and land in one append-only Postgres table, from
-where the data tiers hot → cold → gold. The full component breakdown, data
-models, storage rationale, and production evolution path are in the
-[architecture doc](docs/ocpp-ingestion-architecture.md).
+For the sake of this demonstrator, `data\ocpp-data-many-chargers.txt` is treated as a 'live' stream, while 'data\ocpp-data-many-days.txt' is treated as batch backfill/historical data.
+
+Both sources land in the same *Postgres* table (), from which they are dumped into a
+*DuckLake* cold-storage archive 
+
+and derived into gold session facts — the data
+tiers hot → cold → gold. The full component breakdown, data models, and storage
+rationale are in the [architecture doc](docs/architecture.md); known shortcuts and
+the production path are in [`technical-debt.md`](docs/technical-debt.md).
 
 ```
 many-chargers.txt ─(stream consumer)─┐
@@ -31,7 +36,7 @@ matches the same session from the archive. Sessions are keyed by
 `completed` / `active` / `incomplete` status, and derive energy from the meter
 register delta (falling back to `avg(power) × duration`). The fold's ordering,
 OCPP Call/CallResult correlation, parallel-connector handling, and readings
-output are detailed in the [architecture doc](docs/ocpp-ingestion-architecture.md).
+output are detailed in the [architecture doc](docs/architecture.md).
 
 ## Partitioning
 
@@ -39,8 +44,9 @@ The pipeline runs on two independent daily grains so each run reprocesses a
 bounded slice: the archive by *ingestion day* (`raw_events_archive`, materialized
 every 5 min) and gold by *content day* (`gold_sessions` / `gold_analytics_daily`),
 with an asset sensor fanning a newly-archived ingestion day out to the content
-days it touched. The grains, fan-out, and the scalable two-stage design are in
-the [architecture doc](docs/ocpp-ingestion-architecture.md).
+days it touched. The grains and fan-out are detailed in the
+[architecture doc](docs/architecture.md); the scalable two-stage design is in
+[`technical-debt.md`](docs/technical-debt.md).
 
 ## Run it
 
