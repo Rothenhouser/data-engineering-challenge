@@ -180,14 +180,16 @@ def _apply_filters(df: pl.DataFrame, stations: list[str], start, end, ts_col: st
     if stations:
         df = df.filter(pl.col("station_id").is_in(stations))
     if ts_col in df.columns:
-        # The gold table round-trips timestamps through DuckLake, whose
-        # TIMESTAMP type is tz-naive, so the column reads back naive even though
-        # the fold produces UTC. Normalize to UTC-aware before comparing with the
-        # tz-aware bounds: a naive column is interpreted as UTC, an already-aware
-        # one is converted (a no-op for UTC).
+        # Normalize the column to UTC-aware before comparing with the tz-aware
+        # bounds, whatever tz it carries: a naive column is interpreted as UTC;
+        # an already-aware one (DuckLake may render TIMESTAMPTZ in the session's
+        # local tz) is converted to UTC. Both yield a UTC-aware column so the
+        # comparison never hits a tz-supertype error.
         col = pl.col(ts_col)
         if df.schema[ts_col].time_zone is None:
             col = col.dt.replace_time_zone("UTC")
+        else:
+            col = col.dt.convert_time_zone("UTC")
         df = df.filter(
             (col >= datetime.combine(start, datetime.min.time(), UTC))
             & (col <= datetime.combine(end, datetime.max.time(), UTC))

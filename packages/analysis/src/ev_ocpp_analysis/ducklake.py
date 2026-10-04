@@ -66,6 +66,12 @@ def connect(catalog_path: str, data_path: str) -> Iterator[duckdb.DuckDBPyConnec
     con = duckdb.connect()
     try:
         con.execute("INSTALL ducklake; LOAD ducklake;")
+        # Pin the session timezone to UTC. DuckDB renders TIMESTAMPTZ values in
+        # the session's TimeZone, which otherwise defaults to the host's local
+        # zone (e.g. Europe/Berlin) — so the same UTC instant would read back
+        # localized differently per environment and break tz-sensitive callers.
+        # Forcing UTC makes DuckLake reads deterministic regardless of host.
+        con.execute("SET TimeZone = 'UTC';")
         con.execute(
             f"ATTACH 'ducklake:{catalog_path}' AS {CATALOG_ALIAS} "
             "(DATA_PATH ?, OVERRIDE_DATA_PATH TRUE)",
