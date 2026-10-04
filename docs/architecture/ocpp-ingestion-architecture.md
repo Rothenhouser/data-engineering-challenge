@@ -10,6 +10,17 @@ The pipeline uses two independent daily grains — the archive by *ingestion day
 
 Cold archive and gold are stored as **DuckLake** tables: Parquet table data plus a SQL catalog. The catalog metadata lives in the shared **Postgres** (a `ducklake_catalog` database) so every client attaches concurrently; the Parquet data sits on the shared volume. See Storage Rationale.
 
+## How this addresses the client's needs
+
+The brief's pain points and how the design answers each:
+
+- **Fragmented sources → one shape.** A live stream and historical file drops are parsed by one shared library into one append-only Postgres table, so everything downstream sees a single `RawRow` contract.
+- **Real-time *and* historical.** The dashboard reads Postgres for live status and in-flight sessions, and the DuckLake gold tables for completed-session history and fleet rollups — the same sessionization fold powers both.
+- **Aggregation across dimensions.** Analytics roll up per charger, per connector, and per day, with a nullable `site_id` ready for multi-site; the dashboard also computes ad-hoc rollups on the fly in Polars.
+- **Growing data volumes.** Hot data in Postgres (short retention) is tiered to an immutable DuckLake lakehouse; two daily partition grains bound how much each run reprocesses.
+- **Error-prone manual analysis.** Session status is explicit (`completed` / `active` / `incomplete`), the derived layer is duplicate-tolerant, and unparseable frames are counted rather than crashing — so the operational picture is trustworthy without hand-curation.
+- **Portable, not throwaway.** The whole topology is docker-compose for local dev; the Production Evolution Path below lists the exact swaps (object-store data, managed Postgres, a Dagster metadata DB) to take it to production.
+
 ## Architecture
 
 ```mermaid
