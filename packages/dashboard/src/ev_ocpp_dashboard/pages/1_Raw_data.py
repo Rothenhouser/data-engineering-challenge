@@ -18,7 +18,6 @@ from ev_ocpp_analysis import (
 )
 from ev_ocpp_dashboard.config import LAKE_CATALOG, LAKE_DATA, PG_URI
 
-st.set_page_config(page_title="Raw data", layout="wide")
 st.title("Raw data inspector")
 
 n = st.sidebar.slider("Rows to show", min_value=5, max_value=500, value=50, step=5)

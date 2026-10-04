@@ -19,7 +19,6 @@ import streamlit as st
 from ev_ocpp_analysis import ANALYTICS_TABLE, read_gold_table
 from ev_ocpp_dashboard.config import LAKE_CATALOG, LAKE_DATA
 
-st.set_page_config(page_title="Analytics", layout="wide")
 st.title("Fleet analytics")
 
 
@@ -55,7 +54,7 @@ def _roll_up_to_charger(df: pl.DataFrame) -> pl.DataFrame:
 
 daily = _daily()
 if daily.is_empty():
-    st.info("No analytics yet — run the Dagster analytics job.")
+    st.info("No analytics yet — wait for first Dagster archive job (or trigger manually).")
     st.stop()
 
 daily = daily.with_columns(pl.col("day").cast(pl.Date))

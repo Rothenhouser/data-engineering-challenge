@@ -32,7 +32,6 @@ from ev_ocpp_dashboard.config import (
     WINDOW_MINUTES,
 )
 
-st.set_page_config(page_title="Sessions", layout="wide")
 st.title("Charging sessions")
 
 

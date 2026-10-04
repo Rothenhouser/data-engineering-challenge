@@ -16,7 +16,6 @@ import streamlit as st
 from ev_ocpp_analysis import catalog_overview
 from ev_ocpp_dashboard.config import LAKE_CATALOG, LAKE_DATA
 
-st.set_page_config(page_title="DuckLake", layout="wide")
 st.title("DuckLake catalog")
 st.caption(
     "Embedded lakehouse (no service): Parquet data under a local directory, "
