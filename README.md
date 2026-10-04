@@ -72,6 +72,29 @@ Local dashboard dev (hot reload) against the containerized Postgres:
   DuckDB catalog file, embedded (no service), on the local filesystem (no object
   store). First init is the manual `uv run poe bootstrap`; schema migration is
   manual and out of scope for this prototype.
+  - **Inlining**: small tables may be stored *inline in the catalog* rather than
+    written as Parquet files, so their directory under `data/lake/data/main/`
+    can be empty even though the table has rows (e.g. the tiny
+    `gold_analytics_daily`). Don't verify a run by `ls`-ing the data dir — query
+    the table (see below) or use the dashboard's DuckLake page.
+  - **Inspect the lake** in an interactive DuckDB session (reads the same
+    catalog the app writes):
+
+    ```bash
+    duckdb
+    ```
+    ```sql
+    INSTALL ducklake; LOAD ducklake;
+    SET TimeZone = 'UTC';
+    ATTACH 'ducklake:data/lake/catalog.ducklake' AS lake
+      (DATA_PATH 'data/lake/data', OVERRIDE_DATA_PATH TRUE);
+    SELECT * FROM lake.main.gold_analytics_daily;
+    -- table list + per-table file counts (file_count 0 == inlined):
+    SELECT * FROM ducklake_table_info('lake');
+    ```
+
+    Add the DuckDB web UI with `duckdb -ui` instead of `duckdb` (opens a browser
+    UI; run the same SQL there).
 - **Deferred for production** (see design doc): object-store DuckLake data path,
   partitioned archive, managed Postgres, separate Dagster metadata DB, and
   source-level dedup.
