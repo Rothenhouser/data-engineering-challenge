@@ -4,7 +4,7 @@ Ingestion + analytics prototype for EV charging infrastructure emitting OCPP 1.6
 messages.
 
 - Challenge brief: [`CHALLENGE.md`](CHALLENGE.md)
-- Architecture, design decisions & how it answers the brief: [`docs/architecture/ocpp-ingestion-architecture.md`](docs/architecture/ocpp-ingestion-architecture.md)
+- Architecture, design decisions & how it answers the brief: [`docs/ocpp-ingestion-architecture.md`](docs/ocpp-ingestion-architecture.md)
 - How to read the raw data: [`docs/ocpp-message-format.md`](docs/ocpp-message-format.md)
 
 ## Architecture
@@ -13,7 +13,7 @@ Both sources — a live stream and historical file drops — are parsed by one s
 library (`ev_ocpp_analysis`) and land in one append-only Postgres table, from
 where the data tiers hot → cold → gold. The full component breakdown, data
 models, storage rationale, and production evolution path are in the
-[architecture doc](docs/architecture/ocpp-ingestion-architecture.md).
+[architecture doc](docs/ocpp-ingestion-architecture.md).
 
 ```
 many-chargers.txt ─(stream consumer)─┐
@@ -31,7 +31,7 @@ matches the same session from the archive. Sessions are keyed by
 `completed` / `active` / `incomplete` status, and derive energy from the meter
 register delta (falling back to `avg(power) × duration`). The fold's ordering,
 OCPP Call/CallResult correlation, parallel-connector handling, and readings
-output are detailed in the [architecture doc](docs/architecture/ocpp-ingestion-architecture.md).
+output are detailed in the [architecture doc](docs/ocpp-ingestion-architecture.md).
 
 ## Partitioning
 
@@ -40,7 +40,7 @@ bounded slice: the archive by *ingestion day* (`raw_events_archive`, materialize
 every 5 min) and gold by *content day* (`gold_sessions` / `gold_analytics_daily`),
 with an asset sensor fanning a newly-archived ingestion day out to the content
 days it touched. The grains, fan-out, and the scalable two-stage design are in
-the [architecture doc](docs/architecture/ocpp-ingestion-architecture.md).
+the [architecture doc](docs/ocpp-ingestion-architecture.md).
 
 ## Run it
 
