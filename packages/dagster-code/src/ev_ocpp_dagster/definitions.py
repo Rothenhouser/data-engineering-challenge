@@ -123,9 +123,14 @@ def archive_to_sessions_sensor(context: SensorEvaluationContext, asset_event: Ev
     if not content_days:
         context.log.info("sensor: archive %s touched no in-range content days", ingestion_day)
         return
+    # The run_key must be unique per *materialization*, not per (ingestion-day,
+    # content-day) pair: the archive partition for the current day is
+    # re-materialized every 5 minutes with fresh data, and Dagster dedupes
+    # RunRequests by run_key. Keying on the triggering archive run_id (unique per
+    # archive materialization) re-fires the session job on every archive update.
     for day in content_days:
         yield RunRequest(
-            run_key=f"{ingestion_day}:{day}",
+            run_key=f"{asset_event.run_id}:{day}",
             partition_key=day,
         )
 
