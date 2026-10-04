@@ -33,11 +33,15 @@ bootstrap = "python -m ev_ocpp_dagster.bootstrap"
 # DESTRUCTIVE: wipe all local pipeline state, then re-bootstrap a clean slate.
 # Drops the raw_events table + the ducklake_catalog DB in the containerized
 # Postgres, removes the DuckLake Parquet data and local Dagster run storage,
-# then runs `poe bootstrap` to recreate the catalog DB. Local dev only.
-reset = ["_drop_raw_events", "_drop_catalog_db", "_rm_lake_data", "_rm_dagster_home", "bootstrap"]
+# runs `poe bootstrap` to recreate the catalog DB, then recreates the empty
+# raw_events landing table. Local dev only.
+reset = ["_drop_raw_events", "_drop_catalog_db", "_rm_lake_data", "_rm_dagster_home", "bootstrap", "_create_raw_events"]
 _drop_raw_events = { shell = "wsl sudo docker compose -f deploy/docker-compose.yml exec -T postgres psql -U ocpp -d ocpp -c 'DROP TABLE IF EXISTS raw_events'" }
 _drop_catalog_db = { shell = "wsl sudo docker compose -f deploy/docker-compose.yml exec -T postgres psql -U ocpp -d postgres -c 'DROP DATABASE IF EXISTS ducklake_catalog WITH (FORCE)'" }
 _rm_lake_data = { shell = "rm -rf data/lake" }
+# Recreate the empty raw_events table from the single-source-of-truth DDL in
+# pg.py (init_schema), rather than duplicating the CREATE TABLE here.
+_create_raw_events = "python -c \"import psycopg; from ev_ocpp_analysis import init_schema; from ev_ocpp_dagster.config import PG_URI; conn=psycopg.connect(PG_URI); init_schema(conn); conn.close(); print('raw_events table ready')\""
 _rm_dagster_home = { shell = "if [ -d dagster_home ]; then find dagster_home -mindepth 1 -not -name dagster.yaml -delete; fi" }
 
 # Format first, then lint with autofix. `poe lint` runs both in order.
