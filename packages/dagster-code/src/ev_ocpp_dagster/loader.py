@@ -35,7 +35,8 @@ _INPUT_GLOB = "ocpp-data-*.txt"
 
 
 class LoadFileConfig(Config):
-    path: str
+    # Default to the historical drop so the Launchpad can run with empty config.
+    path: str = "/app/data/ocpp-data-many-days.txt"
 
 
 @op
