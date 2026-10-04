@@ -1,7 +1,8 @@
 # OCPP message format (how to read the data)
 
-Each line in the `ocpp-data-*.txt` files is one OCPP-J message: `stationId : [ ... ]`.
-The data is a log of request/response traffic between chargers and the central
+Each line in the `ocpp-data-*.txt` files is one OCPP-J message: `chargerId : [ ... ]`
+(the charger id is the OCPP *charge point* identifier; our schema calls it
+`charger_id`). The data is a log of request/response traffic between chargers and the central
 system. A **Call** is a request ("do this action"), answered by a **CallResult**
 (success) or a **CallError** (failure). The two halves of an exchange appear as
 separate lines that share one id, e.g. a `Heartbeat` request and the reply

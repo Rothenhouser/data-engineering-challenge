@@ -4,9 +4,11 @@
 
 EV Coorp's chargers emit OCPP 1.6 two ways: a continuous live stream and en-bloc historical file drops when a charger or site is onboarded. Both flow through **one shared parsing library**, land raw frames in a durable, concurrent Postgres hot landing zone, archive to an immutable cold store, and derive charging-session facts (gold) for cheap analytical reads.
 
-Two axes split the system. **Ingestion mode:** a standalone always-on service handles the live stream; a Dagster directory-scan sensor handles historical drops — both write the same `raw_events` table. **Data temperature:** frames land hot in Postgres, then one Dagster asset job materializes three chained assets — archive new rows to the cold store, rebuild gold session facts, roll up daily analytics. All business logic is **Polars** — not SQL, not an ORM. One shared ordered sessionization fold reconstructs sessions regardless of source, powering both historical gold and live in-flight sessions. The whole topology runs under docker-compose.
+Two axes split the system. **Ingestion mode:** a standalone always-on service handles the live stream; a Dagster batch loader (`load_file_job`) handles historical drops — both write the same `raw_events` table. **Data temperature:** frames land hot in Postgres, then Dagster assets archive new rows to the cold store, rebuild gold session facts, and roll up daily analytics. All business logic is **Polars** — not SQL, not an ORM. One shared ordered sessionization fold reconstructs sessions regardless of source, powering both historical gold and live in-flight sessions. The whole topology runs under docker-compose.
 
-Cold archive and gold are stored as **DuckLake** tables (Parquet data + a DuckDB-file catalog) rather than loose Parquet files. See Storage Rationale.
+The pipeline uses two independent daily grains — the archive by *ingestion day*, gold by *content day* — so each run reprocesses a bounded slice. See Partitioning.
+
+Cold archive and gold are stored as **DuckLake** tables: Parquet table data plus a SQL catalog. The catalog metadata lives in the shared **Postgres** (a `ducklake_catalog` database) so every client attaches concurrently; the Parquet data sits on the shared volume. See Storage Rationale.
 
 ## Architecture
 
@@ -18,16 +20,16 @@ graph TD
     end
     subgraph Ingestion
         STREAM["Stream Consumer (standalone, scales)"]
-        LOADER["Dagster Batch Loader (dir-scan sensor)"]
+        LOADER["Dagster Batch Loader (load_file_job, manual)"]
     end
     LIB["Shared Library ev_ocpp_analysis<br/>(parsing + Polars reconstruct_sessions)"]
     PG[("Postgres raw_events<br/>hot, durable, concurrent, append-only")]
-    subgraph Pipeline["Dagster asset pipeline job"]
-        DUMP["raw_events_archive"]
-        SESS["gold_sessions"]
-        ANALYTICS["gold_analytics_daily"]
+    subgraph Pipeline["Dagster assets (two daily grains)"]
+        DUMP["raw_events_archive<br/>(ingestion day, */5 schedule)"]
+        SESS["gold_sessions<br/>(content day, sensor fan-out)"]
+        ANALYTICS["gold_analytics_daily<br/>(content day, eager)"]
     end
-    LAKE[("DuckLake<br/>cold archive + gold<br/>(Parquet + DuckDB catalog)")]
+    LAKE[("DuckLake cold archive + gold<br/>Parquet data + Postgres catalog")]
     DASH["Streamlit Dashboard"]
 
     S1 --> STREAM --> PG
@@ -43,9 +45,18 @@ graph TD
     PG -. retention: drop archived rows .-> PG
 ```
 
-Both ingestion paths import `ev_ocpp_analysis` and write the same `RawRow` shape to Postgres — the single convergence point. One asset job (`ocpp_pipeline_job`, on a `*/5` schedule) then runs three chained assets: archive to the cold DuckLake table, reconstruct sessions into gold, roll up daily analytics. The dashboard reads gold for completed-session history and fleet rollups, and reads Postgres directly for live status and in-flight session reconstruction (same shared fold over a bounded recent window).
+Both ingestion paths import `ev_ocpp_analysis` and write the same `RawRow` shape to Postgres — the single convergence point. Three assets then run on two daily grains: `archive_schedule` materializes the current ingestion-day `raw_events_archive` partition every 5 minutes; an asset sensor fans `session_job` out to each content day the newly-archived data touched; and `gold_analytics_daily` re-materializes those content days eagerly (`AutomationCondition`). See Partitioning. The dashboard reads gold for completed-session history and fleet rollups, and reads Postgres directly for live status and in-flight session reconstruction (same shared fold over a bounded recent window).
 
 The landing table is **append-only**: both producers write plain parameterized `INSERT`s. No unique constraint, no dedup pass — duplicate business frames (stream replay or a re-dropped file) are recorded intentionally, and the derived layer collapses them at read time.
+
+## Partitioning
+
+Two independent daily grains keep each run bounded instead of reprocessing everything:
+
+- **Ingestion day** (`raw_events_archive`) — real wall-clock `ingest_ts`, open-ended. `archive_schedule` materializes today's partition every 5 min, replacing that day's slice idempotently.
+- **Content day** (`gold_sessions`, `gold_analytics_daily`) — session `start_time`, a static range over the sample data. An asset sensor maps each archived ingestion day to the content days it touched and requests those session partitions; analytics follow eagerly.
+
+The grain efficient to ingest (ingestion day) differs from the grain correct for sessions (content day), and a session can straddle both — so the mapping is a fan-out, not a 1:1. Current tradeoff (acceptable for the demonstrator): `gold_sessions` reads the full archive per run; the scalable two-stage map/reduce fix is noted below.
 
 ## Components
 
@@ -58,7 +69,7 @@ The landing table is **append-only**: both producers write plain parameterized `
 
 **Duplicate tolerance:** because the raw layer is append-only, the fold is idempotent to duplicate raw events — content-identical frames are collapsed inside the fold, so sessions, counts, and energy are not double-counted.
 
-The package also holds the readers, measurand extraction (`measurands.py`), daily analytics (`analytics.py`), the station→site dimension (`sites.py`), the Postgres and DuckLake persistence helpers (`pg.py`, `ducklake.py`), and the stream simulation control table (`sim_control.py`).
+The package also holds the readers, measurand extraction (`measurands.py`), daily analytics (`analytics.py`), the charger→site dimension (`sites.py`), the Postgres and DuckLake persistence helpers (`pg.py`, `ducklake.py`), and the stream simulation control table (`sim_control.py`).
 
 ```text
 parse_raw_row(line) -> RawRow | None
@@ -81,15 +92,15 @@ Readers live in `ev_ocpp_analysis` so "fetch → fold" is one import.
 
 ### Dagster Historical / Batch Loader
 
-**Package:** `ev_ocpp_dagster` (`packages/dagster-code`). A directory-scan sensor (`historical_file_sensor`) that detects new files (by name + cursor), parses them via `ev_ocpp_analysis`, and bulk-`INSERT`s raw events into the same `raw_events` table via its op job (`load_file_job`). Models "charger onboarded with historical data."
+**Package:** `ev_ocpp_dagster` (`packages/dagster-code`). `load_file_job` parses a dropped file via `ev_ocpp_analysis` and bulk-`INSERT`s raw events into the same `raw_events` table, reporting an `AssetMaterialization` for the `raw_events` source asset. Models "charger onboarded with historical data." A directory-scan sensor exists but for the demonstrator the job is **launched manually** (Launchpad, op config = the file path).
 
 ### Dagster Asset Pipeline (archive → sessions → analytics)
 
-**Package:** `ev_ocpp_dagster`. Three assets chained by `deps`, materialized in order by `ocpp_pipeline_job`:
+**Package:** `ev_ocpp_dagster`. `raw_events` is an external **source asset** (the Postgres landing zone, written imperatively by the stream and loader); the three computed assets below sit downstream, on two daily grains (see Partitioning):
 
-- **`raw_events_archive`** — copies the not-yet-archived `raw_events` slice (watermark cursor) into the immutable cold DuckLake archive table as a new append, making short Postgres retention safe. Each append is a DuckLake snapshot.
-- **`gold_sessions`** — reads the archive through the DuckLake → Polars reader and rebuilds session facts via the shared `reconstruct_sessions` fold (sessions keyed by `station_id + connector_id + start_time`), plus per-session readings, into gold DuckLake tables.
-- **`gold_analytics_daily`** — rolls gold sessions up into one row per `(station_id, day)`, including fault counts from archived `StatusNotification`s.
+- **`raw_events_archive`** (ingestion-day partitioned) — copies the partition's `raw_events` slice into the immutable cold DuckLake archive via delete-day-then-insert, so a re-run of today's partition never duplicates. `archive_schedule` runs it every 5 minutes. Each write is a DuckLake snapshot.
+- **`gold_sessions`** (content-day partitioned) — reads the archive through the DuckLake → Polars reader and rebuilds session facts via the shared `reconstruct_sessions` fold (keyed by `charger_id + connector_id + start_time`), plus per-session readings, into gold DuckLake tables. An asset sensor fans runs out per content day a new archive partition touched.
+- **`gold_analytics_daily`** (content-day partitioned, eager) — rolls gold sessions up into one row per `(charger_id, connector_id, day)`, including fault counts from archived `StatusNotification`s.
 
 ### Streamlit Dashboard
 
@@ -119,7 +130,7 @@ Serves the `ev_ocpp_dagster` code location (`packages/dagster-server` wires the 
 
 A single parsed OCPP-J frame, produced identically by both ingestion paths, landed in Postgres `raw_events`, then archived verbatim into the DuckLake cold table. The raw/audit layer does **no content processing** — parsing only splits the frame structurally; measurand extraction happens later, inside the fold.
 
-**Fields:** `event_id` (surrogate ingest sequence / PK), `station_id`, `msg_type` (2/3/4), `unique_id` (correlation id; repeats — not a key), `action` (null for CallResult/CallError), `payload` (raw JSON stored AS-IS — `jsonb` in Postgres, nested-or-JSON in the archive), `ingest_ts` (wall-clock ingest time, not parsed from payload).
+**Fields:** `event_id` (surrogate ingest sequence / PK), `charger_id`, `msg_type` (2/3/4), `unique_id` (correlation id; repeats — not a key), `action` (null for CallResult/CallError), `payload` (raw JSON stored AS-IS — `jsonb` in Postgres, nested-or-JSON in the archive), `ingest_ts` (wall-clock ingest time, not parsed from payload).
 
 Append-only; a re-dropped file is appended again by design. Duplicate business frames can exist in the raw layer and the archive — intended, collapsed at read time by the fold.
 
@@ -127,25 +138,25 @@ Append-only; a re-dropped file is appended again by design. Duplicate business f
 
 A derived gold fact reconstructed by the shared fold. The identical entity is produced for the live view (over Postgres) and historical gold (over the archive).
 
-**Fields:** `session_id`, `station_id`, `connector_id`, `status` (`completed` / `active` / `incomplete`), `start_time`, `end_time`, `duration`, `total_energy_kwh` (running for open sessions), `avg_power`, `peak_power`, `event_count`, `stop_reason` (where present), nullable `site_id`.
+**Fields:** `session_id`, `charger_id`, `connector_id`, `status` (`completed` / `active` / `incomplete`), `start_time`, `end_time`, `duration`, `total_energy_kwh` (running for open sessions), `avg_power`, `peak_power`, `event_count`, `stop_reason` (where present), nullable `site_id`.
 
-**Session identity key:** `station_id + connector_id + start_time` (deliberately **not** `transaction_id` or `unique_id`, which reset/repeat). The key only exists after the opening event, which is why reconstruction is an ordered fold.
+**Session identity key:** `charger_id + connector_id + start_time` (deliberately **not** `transaction_id` or `unique_id`, which reset/repeat). The key only exists after the opening event, which is why reconstruction is an ordered fold.
 
 ### Fleet rollups
 
-Per-charger / per-day rollups derived from `ChargingSession` (grouping `station_id`, `day`, future `site`; measures session count, total energy, avg/peak power, active-vs-completed counts, fault counts). Materialized by `gold_analytics_daily`; the dashboard also computes finer rollups on the fly in Polars.
+Per-connector / per-day rollups derived from `ChargingSession`, one row per `(charger_id, connector_id, day)` (future `site`; measures session count, total energy, avg/peak power, utilization, fault counts). Materialized by `gold_analytics_daily`; the dashboard rolls connectors up to a whole-charger total or shows a single connector, and computes finer rollups on the fly in Polars.
 
 ## Storage Rationale
 
 **Hot landing zone — Postgres.** Three reasons: **durability** (each frame a committed `INSERT`, crash-safe, no in-memory write buffer), **concurrency** (many always-on consumers plus the loader write at once against one append-only table while the dashboard reads), and a **hot recent window** for low-latency live views. The table is append-only.
 
-**Cold archive + gold — DuckLake (Parquet data + DuckDB-file catalog).** DuckLake is a lakehouse format: table data stays in Parquet, but all metadata (snapshots, schema, file lists, column statistics) lives in a SQL catalog. It is **embedded, not a service** — the DuckDB extension loads in-process (in the Dagster assets and the dashboard); there is no extra container or daemon. For this prototype the catalog is a local DuckDB file on the shared volume and the data is a local directory — no object store required. This buys over loose Parquet:
+**Cold archive + gold — DuckLake (Parquet data + Postgres catalog).** DuckLake is a lakehouse format: table data stays in Parquet, but all metadata (snapshots, schema, file lists, column statistics) lives in a SQL catalog. The DuckDB `ducklake` extension loads **in-process** (in the Dagster assets and the dashboard) — no lake service or daemon. The catalog metadata is kept in the shared Postgres (database `ducklake_catalog`) and the Parquet data is a local directory on the shared volume — no object store required. Keeping the catalog in Postgres rather than an embedded DuckDB file lets multiple clients (dashboard, Dagster, stream) attach the catalog concurrently without the single-writer file-lock contention a DuckDB-file catalog imposes. This buys over loose Parquet:
 
 - **Enforced schema** across every append/day — a mismatched write fails instead of silently landing a drifted file.
 - **Snapshots + time travel** — each archive append and each gold rebuild is a snapshot, so reads never see a half-written layer, and a bad rebuild is recoverable.
 - **A queryable catalog** — "what data do we have" (tables, schemas, row counts, per-column min/max/null stats) answered from the catalog without scanning Parquet.
 - **Pushdown from real statistics** rather than filename-glob guesswork.
-- **Watermark in the catalog** — the archive's not-yet-archived slice is `event_id > max(event_id)` in the cold table, so a separate cursor file goes away.
+- **Idempotent partition writes** — the archive replaces a day's slice (delete-day-then-insert) within a single DuckLake snapshot, so re-running a partition is safe and no external cursor file is needed.
 
 **Why DuckLake does not replace Postgres on the hot path:** DuckLake writes at snapshot granularity in large batches and coordinates writers optimistically through a sequential snapshot counter in the catalog. That suits the single-writer, batched archive/gold assets, but not many high-frequency per-message durable writers — which is exactly Postgres's job. The two-tier split (Postgres hot, DuckLake cold+gold) uses each where it fits.
 
@@ -155,20 +166,20 @@ Per-charger / per-day rollups derived from `ChargingSession` (grouping `station_
 
 docker-compose services:
 
-- **postgres** — hot landing zone (durable per-message, concurrent, append-only, short retention).
-- **dagster** — webserver + daemon serving `ev_ocpp_dagster`: loader sensor + asset pipeline job. Loads the DuckLake extension in-process to read/write the cold + gold tables.
+- **postgres** — hot landing zone (durable per-message, concurrent, append-only, short retention) **and** the DuckLake catalog metadata (`ducklake_catalog` database).
+- **dagster** — webserver + daemon serving `ev_ocpp_dagster`: the batch loader and the archive/session/analytics assets. Loads the DuckLake extension in-process to read/write the cold + gold tables.
 - **stream** — standalone `ev_ocpp_stream` consumer; may run as multiple replicas (`--scale stream=N`).
 - **streamlit** — dashboard reading Postgres (live) and the gold DuckLake tables (history).
-- **shared volume** — the host `data/` dir bind-mounted at `/app/data`: `many-*.txt` inputs, the DuckLake Parquet data dir, and the DuckLake catalog file (`data/lake/`).
+- **shared volume** — the host `data/` dir bind-mounted at `/app/data`: `many-*.txt` inputs and the DuckLake Parquet data dir (`data/lake/data`). The catalog is in Postgres, not on the volume.
 
-The DuckLake catalog file and data dir live on the shared volume so every container that loads the extension sees the same tables. No DuckLake service is deployed.
+Every client reaches the same lake by attaching the Postgres catalog and the shared Parquet data dir. No DuckLake service is deployed.
 
-**First-time setup:** `uv run poe bootstrap` opens the shared `connect`, which auto-creates the catalog file and data directory. The archive and gold tables are then created lazily by the first Dagster write.
+**First-time setup:** `uv run poe bootstrap` creates the `ducklake_catalog` Postgres database and the `raw_events` table. The archive and gold tables are created lazily by the first Dagster write.
 
 ### Production evolution path (documented, not built)
 
-- **Storage:** swap the local DuckLake data directory for an object store (S3 / GCS / ABFS); move the catalog file to a Postgres-backed DuckLake catalog for concurrent multi-writer gold builds.
-- **Partitioned archive:** partition the DuckLake tables (e.g. by day/station) with compaction.
+- **Storage:** swap the local DuckLake data directory for an object store (S3 / GCS / ABFS). The catalog is already Postgres-backed, supporting concurrent multi-client gold builds.
+- **Partitioned archive:** add physical partitioning/compaction to the DuckLake tables (the logical ingestion-day grain is already in place).
 - **Postgres:** managed Postgres with backups and pooling; a separate metadata DB for Dagster.
 - **Schema migration:** additive upstream changes (a new OCPP field) are handled by a manual, reviewed `ALTER TABLE ADD COLUMN` run through DuckDB (old partitions read the new column as NULL, no rewrite); non-additive changes stay fail-closed.
 - **Secrets/config:** externalize connection strings to a secrets manager.
@@ -188,7 +199,7 @@ The DuckLake catalog file and data dir live on the shared volume so every contai
 - **P3 — No silent loss:** every frame is parsed into a `RawRow` or counted as skipped.
 - **P4 — Archive completeness:** every landing row is archived to the immutable cold table before retention drops it.
 - **P5 — Shared-logic equivalence:** both ingestion paths produce an identical `RawRow` shape, and live and historical session views use the identical fold.
-- **P6 — Energy derivation:** each session's `total_energy_kwh` = `mean(Power.Active.Import) × duration` (running for open sessions).
+- **P6 — Energy derivation:** each session's `total_energy_kwh` is the meter register delta (`Energy.Active.Import.Register` last − first), falling back to `mean(Power.Active.Import) × duration` when no register readings exist (running for open sessions).
 - **P7 — Status is total and exclusive:** every `status` is exactly one of `completed`, `active`, `incomplete`.
 - **P8 — Gold is a pure, rebuildable function of the archive:** re-deriving from the same archive produces the same session facts.
 
@@ -204,7 +215,7 @@ The DuckLake catalog file and data dir live on the shared volume so every contai
 - **psycopg** — append-only ingestion `INSERT`s (parameterized). No ORM.
 - **Polars** — all in-memory business logic.
 - **ConnectorX** (via `read_database_uri`) — live Postgres reads.
-- **DuckDB + DuckLake extension** — cold archive and gold: embedded reads/appends, schema-enforced, snapshotted; local Parquet data + local DuckDB catalog file.
+- **DuckDB + DuckLake & Postgres extensions** — cold archive and gold: embedded reads/appends, schema-enforced, snapshotted; local Parquet data + a Postgres-backed catalog.
 - **Dagster** (webserver + daemon) — orchestration.
 - **Streamlit** — dashboard.
 - **uv workspace** (Python 3.14), **docker-compose**.
