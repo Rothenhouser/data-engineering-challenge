@@ -36,7 +36,7 @@ session_job = define_asset_job(name="session_job", selection=[gold_sessions])
 # partition cadence) lets the sub-daily cron re-run today's partition.
 @schedule(
     job=archive_job,
-    cron_schedule="*/5 * * * *",
+    cron_schedule="*/1 * * * *",
     name="archive_schedule",
     default_status=DefaultScheduleStatus.RUNNING,
 )
