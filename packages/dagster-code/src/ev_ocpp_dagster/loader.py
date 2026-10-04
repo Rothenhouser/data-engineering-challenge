@@ -19,7 +19,6 @@ import os
 import psycopg
 from dagster import (
     Config,
-    Field,
     RunConfig,
     RunRequest,
     SensorEvaluationContext,
@@ -37,7 +36,7 @@ _INPUT_GLOB = "ocpp-data-*.txt"
 
 
 class LoadFileConfig(Config):
-    path: Field(str, default_value='/app/data/ocpp-data-many-chargers.txt')
+    path: str
 
 
 @op
