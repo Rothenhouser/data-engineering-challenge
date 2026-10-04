@@ -71,24 +71,24 @@ def _live() -> tuple[pl.DataFrame, pl.DataFrame]:
 gold_sessions, gold_readings = _gold()
 live_sessions, live_readings = _live()
 
-all_stations = sorted(
-    set(gold_sessions["station_id"].to_list() if not gold_sessions.is_empty() else [])
-    | set(live_sessions["station_id"].to_list() if not live_sessions.is_empty() else [])
+all_chargers = sorted(
+    set(gold_sessions["charger_id"].to_list() if not gold_sessions.is_empty() else [])
+    | set(live_sessions["charger_id"].to_list() if not live_sessions.is_empty() else [])
 )
-if not all_stations:
+if not all_chargers:
     st.info("No sessions yet. Start the stream and run the Dagster session job.")
     st.stop()
 
-station = st.selectbox("Charger", all_stations)
+charger = st.selectbox("Charger", all_chargers)
 
 # --- build the session list for this charger -------------------------------
 hist = (
-    gold_sessions.filter(pl.col("station_id") == station)
+    gold_sessions.filter(pl.col("charger_id") == charger)
     if not gold_sessions.is_empty()
     else pl.DataFrame()
 )
 current = (
-    live_sessions.filter((pl.col("station_id") == station) & (pl.col("status") == "active"))
+    live_sessions.filter((pl.col("charger_id") == charger) & (pl.col("status") == "active"))
     if not live_sessions.is_empty()
     else pl.DataFrame()
 )
@@ -102,7 +102,7 @@ if not hist.is_empty():
     st.caption("Historical sessions")
     st.dataframe(hist.select(cols).sort("start_time", descending=True), width="stretch")
 elif current.is_empty():
-    st.info(f"No sessions for {station}.")
+    st.info(f"No sessions for {charger}.")
     st.stop()
 
 # --- pick a session and plot its charging curve ----------------------------

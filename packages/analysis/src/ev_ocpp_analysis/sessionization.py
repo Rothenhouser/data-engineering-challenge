@@ -24,10 +24,10 @@ from .measurands import Measurand, read_measurand
 from .sites import site_for
 
 # Columns a raw-event frame must carry for the fold (the RawEvent shape).
-RAW_COLUMNS = ("station_id", "msg_type", "unique_id", "action", "payload", "ingest_ts")
+RAW_COLUMNS = ("charger_id", "msg_type", "unique_id", "action", "payload", "ingest_ts")
 SESSION_COLUMNS = (
     "session_id",
-    "station_id",
+    "charger_id",
     "site_id",
     "connector_id",
     "status",
@@ -43,7 +43,7 @@ SESSION_COLUMNS = (
 # Per-session time-series readings (the charging curve), one row per MeterValues.
 READING_COLUMNS = (
     "session_id",
-    "station_id",
+    "charger_id",
     "timestamp",
     "power_kw",
     "soc_pct",
@@ -51,7 +51,7 @@ READING_COLUMNS = (
 )
 READING_SCHEMA = {
     "session_id": pl.Utf8,
-    "station_id": pl.Utf8,
+    "charger_id": pl.Utf8,
     "timestamp": pl.Datetime(time_zone="UTC"),
     "power_kw": pl.Float64,
     "soc_pct": pl.Float64,
@@ -113,7 +113,7 @@ def _dedup(events: pl.DataFrame) -> list[dict[str, Any]]:
     for i, r in enumerate(rows):
         payload = _as_dict(r.get("payload"))
         key = (
-            r.get("station_id"),
+            r.get("charger_id"),
             r.get("msg_type"),
             r.get("unique_id"),
             r.get("action"),
@@ -155,31 +155,31 @@ def reconstruct_sessions_and_readings(
 
     Returns ``(sessions, readings)``. ``readings`` has one row per MeterValues
     sample for an open session (the charging curve): ``session_id``,
-    ``station_id``, ``timestamp``, ``power_kw``, ``soc_pct``,
+    ``charger_id``, ``timestamp``, ``power_kw``, ``soc_pct``,
     ``energy_register_kwh``. Each reading links to its session by ``session_id``.
 
     Opens a session on StartTransaction, accumulates Power.Active.Import samples
     from MeterValues while open, and closes on StopTransaction. Sessions are keyed
-    by ``station_id + connector_id + start_time``. Open sessions get ``active`` or
+    by ``charger_id + connector_id + start_time``. Open sessions get ``active`` or
     ``incomplete`` status depending on whether they fall in the recent window.
     """
     now = now or datetime.now(UTC)
     rows = _dedup(events)
 
-    # One open session per (station, connector); closed sessions are emitted.
+    # One open session per (charger, connector); closed sessions are emitted.
     open_sessions: dict[tuple[str, Any], dict[str, Any]] = {}
     done: list[dict[str, Any]] = []
     # OCPP correlation: a StartTransaction Call carries connectorId but no
     # transactionId; its CallResult (same unique_id) carries the transactionId;
     # the StopTransaction carries transactionId but no connectorId. We thread the
     # two maps so a Stop can find the connector its session is keyed by.
-    uid_to_connector: dict[tuple[str, str], Any] = {}  # (station, unique_id) -> connector
-    txn_to_connector: dict[tuple[str, Any], Any] = {}  # (station, transactionId) -> connector
+    uid_to_connector: dict[tuple[str, str], Any] = {}  # (charger, unique_id) -> connector
+    txn_to_connector: dict[tuple[str, Any], Any] = {}  # (charger, transactionId) -> connector
 
     readings: list[dict[str, Any]] = []  # per-session charging-curve samples
 
-    def _session_id(station: Any, connector: Any, start: datetime) -> str:
-        return f"{station}|{connector}|{start.isoformat()}"
+    def _session_id(charger: Any, connector: Any, start: datetime) -> str:
+        return f"{charger}|{connector}|{start.isoformat()}"
 
     def finalize(s: dict[str, Any], end: datetime | None, reason: str | None) -> dict[str, Any]:
         start = s["start_time"]
@@ -206,8 +206,8 @@ def reconstruct_sessions_and_readings(
             status = "incomplete"
         return {
             "session_id": s["session_id"],
-            "station_id": s["station_id"],
-            "site_id": site_for(s["station_id"], sites),
+            "charger_id": s["charger_id"],
+            "site_id": site_for(s["charger_id"], sites),
             "connector_id": s["connector_id"],
             "status": status,
             "start_time": start,
@@ -223,17 +223,17 @@ def reconstruct_sessions_and_readings(
     for r in rows:  # type: ignore[assignment]
         action = r.get("action")
         payload = r["_payload"]
-        station = r.get("station_id")
+        charger = r.get("charger_id")
         connector = payload.get("connectorId")
 
         if action == "StartTransaction":
-            key = (station, connector)
+            key = (charger, connector)
             # A new Start closes any dangling open session on the same connector.
             if key in open_sessions:
                 done.append(finalize(open_sessions.pop(key), None, None))
             open_sessions[key] = {
-                "session_id": _session_id(station, connector, r["_time"]),
-                "station_id": station,
+                "session_id": _session_id(charger, connector, r["_time"]),
+                "charger_id": charger,
                 "connector_id": connector,
                 "start_time": r["_time"],
                 "powers": [],
@@ -241,21 +241,21 @@ def reconstruct_sessions_and_readings(
                 "reg_first": None,  # first/last Energy.Active.Import.Register seen
                 "reg_last": None,
             }
-            uid_to_connector[(station, r.get("unique_id"))] = connector
+            uid_to_connector[(charger, r.get("unique_id"))] = connector
         elif action is None and payload.get("transactionId") is not None:
             # StartTransaction CallResult: links transactionId -> connector.
-            conn = uid_to_connector.get((station, r.get("unique_id")))
+            conn = uid_to_connector.get((charger, r.get("unique_id")))
             if conn is not None:
-                txn_to_connector[(station, payload.get("transactionId"))] = conn
+                txn_to_connector[(charger, payload.get("transactionId"))] = conn
         elif action == "StopTransaction":
-            conn = txn_to_connector.get((station, payload.get("transactionId")))
-            key = (station, conn)
+            conn = txn_to_connector.get((charger, payload.get("transactionId")))
+            key = (charger, conn)
             if key in open_sessions:
                 s = open_sessions.pop(key)
                 s["event_count"] += 1
                 done.append(finalize(s, r["_time"], payload.get("reason")))
         elif action == "MeterValues":
-            key = (station, connector)
+            key = (charger, connector)
             if key in open_sessions:
                 s = open_sessions[key]
                 s["event_count"] += 1
@@ -272,7 +272,7 @@ def reconstruct_sessions_and_readings(
                 readings.append(
                     {
                         "session_id": s["session_id"],
-                        "station_id": station,
+                        "charger_id": charger,
                         "timestamp": _metervalue_time(payload) or r["_time"],
                         "power_kw": p,
                         "soc_pct": read_measurand(payload, Measurand.SOC),
@@ -286,7 +286,7 @@ def reconstruct_sessions_and_readings(
 
     sessions_schema = {
         "session_id": pl.Utf8,
-        "station_id": pl.Utf8,
+        "charger_id": pl.Utf8,
         "site_id": pl.Utf8,
         "connector_id": pl.Int64,
         "status": pl.Utf8,

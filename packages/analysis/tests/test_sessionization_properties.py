@@ -47,18 +47,18 @@ def _meter_payload(connector, ts, power, soc, register):
 def _build_events(sessions_spec: list[dict], ingest_start: datetime) -> pl.DataFrame:
     """Turn a list of session specs into an ordered raw-event frame.
 
-    Each spec: {station, connector, start_offset_s, powers: [kw...], step_s,
+    Each spec: {charger, connector, start_offset_s, powers: [kw...], step_s,
     stop: bool}. Rows get a monotonically increasing ingest_ts.
     """
     rows: list[dict] = []
     seq = 0
     uid = 0
 
-    def add(station, msg_type, action, payload):
+    def add(charger, msg_type, action, payload):
         nonlocal seq, uid
         rows.append(
             {
-                "station_id": station,
+                "charger_id": charger,
                 "msg_type": msg_type,
                 "unique_id": f"u{uid}",
                 "action": action,
@@ -69,12 +69,12 @@ def _build_events(sessions_spec: list[dict], ingest_start: datetime) -> pl.DataF
         seq += 1
 
     for spec in sessions_spec:
-        station, connector = spec["station"], spec["connector"]
+        charger, connector = spec["charger"], spec["connector"]
         t0 = BASE + timedelta(seconds=spec["start_offset_s"])
         uid += 1
-        add(station, 2, "StartTransaction", {"connectorId": connector, "timestamp": t0.isoformat()})
+        add(charger, 2, "StartTransaction", {"connectorId": connector, "timestamp": t0.isoformat()})
         # Start CallResult carries transactionId (links txn -> connector).
-        add(station, 3, None, {"transactionId": connector})
+        add(charger, 3, None, {"transactionId": connector})
         register = spec["reg0"]
         t = t0
         for i, power in enumerate(spec["powers"]):
@@ -82,25 +82,25 @@ def _build_events(sessions_spec: list[dict], ingest_start: datetime) -> pl.DataF
             register += power * (spec["step_s"] / 3600.0)
             uid += 1
             payload = _meter_payload(connector, t, power, 50 + i, round(register, 4))
-            add(station, 2, "MeterValues", payload)
-            add(station, 3, None, {})
+            add(charger, 2, "MeterValues", payload)
+            add(charger, 3, None, {})
         if spec["stop"]:
             t = t + timedelta(seconds=spec["step_s"])
             uid += 1
             add(
-                station,
+                charger,
                 2,
                 "StopTransaction",
                 {"transactionId": connector, "timestamp": t.isoformat(), "reason": "Local"},
             )
-            add(station, 3, None, {})
+            add(charger, 3, None, {})
     return pl.DataFrame(rows, schema_overrides={"payload": pl.Object})
 
 
-# Strategy: a handful of sessions on a few stations/connectors.
+# Strategy: a handful of sessions on a few chargers/connectors.
 _session = st.fixed_dictionaries(
     {
-        "station": st.sampled_from(["c1", "c2", "c3"]),
+        "charger": st.sampled_from(["c1", "c2", "c3"]),
         "connector": st.sampled_from([1, 2]),
         "start_offset_s": st.integers(min_value=0, max_value=5000),
         "powers": st.lists(st.floats(min_value=0.0, max_value=150.0), min_size=0, max_size=6),
@@ -112,12 +112,12 @@ _session = st.fixed_dictionaries(
 _specs = st.lists(_session, min_size=1, max_size=5)
 
 
-def _dedup_distinct(spec_station_connector_starts: list[dict]) -> list[dict]:
-    """Keep specs with a unique (station, connector, start) so sessions are distinct."""
+def _dedup_distinct(spec_charger_connector_starts: list[dict]) -> list[dict]:
+    """Keep specs with a unique (charger, connector, start) so sessions are distinct."""
     seen = set()
     out = []
-    for s in spec_station_connector_starts:
-        k = (s["station"], s["connector"], s["start_offset_s"])
+    for s in spec_charger_connector_starts:
+        k = (s["charger"], s["connector"], s["start_offset_s"])
         if k in seen:
             continue
         seen.add(k)

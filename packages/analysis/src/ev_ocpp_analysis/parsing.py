@@ -1,6 +1,6 @@
 """Parse raw OCPP log lines into the raw-landing storage shape.
 
-Each line is one OCPP-J message `stationId : [...]`:
+Each line is one OCPP-J message `chargerId : [...]`:
     chargerN : [2, "<UniqueId>", "<Action>", {payload}]              # Call
     chargerN : [3, "<UniqueId>", {payload}]                          # CallResult
     chargerN : [4, "<UniqueId>", "<errCode>", "<errDesc>", {detail}] # CallError
@@ -10,7 +10,7 @@ response to its request (a CallResult reuses its Call's UniqueId). UniqueId is
 unique per sender+connection, NOT globally — do not use it as a row key.
 
 The parser produces exactly the five raw-landing columns both ingestion paths
-persist (``station_id``, ``msg_type``, ``unique_id``, ``action``, ``payload``).
+persist (``charger_id``, ``msg_type``, ``unique_id``, ``action``, ``payload``).
 ``payload`` is carried through AS-IS; no convenience fields are lifted into
 columns and no MeterValues pivot is performed — those are derived later by the
 sessionization fold. ``event_id`` and ``ingest_ts`` are supplied by the
@@ -39,7 +39,7 @@ class RawRow:
     layer supplies them at write time.
     """
 
-    station_id: str
+    charger_id: str
     msg_type: int
     unique_id: str  # request-correlation id; unique per sender+connection, not global
     action: str | None  # None for CallResults/CallErrors
@@ -48,7 +48,7 @@ class RawRow:
     def as_row(self) -> dict[str, Any]:
         """Project onto the storage-column mapping the pg writers consume."""
         return {
-            "station_id": self.station_id,
+            "charger_id": self.charger_id,
             "msg_type": self.msg_type,
             "unique_id": self.unique_id,
             "action": self.action,
@@ -57,15 +57,15 @@ class RawRow:
 
 
 def _split_line(line: str) -> tuple[str, str] | None:
-    # Station and the JSON array are separated by " : "
+    # Charger id and the JSON array are separated by " : "
     sep = line.find(" : ")
     if sep == -1:
         return None
-    station = line[:sep].strip()
+    charger = line[:sep].strip()
     body = line[sep + 3 :].strip()
-    if not station or not body:
+    if not charger or not body:
         return None
-    return station, body
+    return charger, body
 
 
 def parse_raw_row(line: str) -> RawRow | None:
@@ -76,7 +76,7 @@ def parse_raw_row(line: str) -> RawRow | None:
     split = _split_line(line)
     if split is None:
         return None
-    station, body = split
+    charger, body = split
     try:
         arr = json.loads(body)
     except json.JSONDecodeError:
@@ -99,7 +99,7 @@ def parse_raw_row(line: str) -> RawRow | None:
         return None
 
     return RawRow(
-        station_id=station,
+        charger_id=charger,
         msg_type=msg_type,
         unique_id=unique_id,
         action=action,

@@ -21,7 +21,7 @@ from .parsing import RawRow
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS raw_events (
     event_id   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    station_id TEXT        NOT NULL,
+    charger_id TEXT        NOT NULL,
     msg_type   SMALLINT    NOT NULL,
     unique_id  TEXT        NOT NULL,
     action     TEXT,
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS raw_events (
 """
 
 _INSERT_SQL = (
-    "INSERT INTO raw_events (station_id, msg_type, unique_id, action, payload, ingest_ts) "
+    "INSERT INTO raw_events (charger_id, msg_type, unique_id, action, payload, ingest_ts) "
     "VALUES (%s, %s, %s, %s, %s, %s)"
 )
 
@@ -45,7 +45,7 @@ def init_schema(conn: psycopg.Connection) -> None:
 def _params(row: RawRow, ingest_ts: datetime) -> tuple:
     mapping = row.as_row()
     return (
-        mapping["station_id"],
+        mapping["charger_id"],
         mapping["msg_type"],
         mapping["unique_id"],
         mapping.get("action"),

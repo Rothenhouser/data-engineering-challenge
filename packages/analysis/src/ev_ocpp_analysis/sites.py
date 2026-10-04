@@ -1,7 +1,7 @@
-"""Station -> site mapping (a nullable analytical dimension).
+"""Charger -> site mapping (a nullable analytical dimension).
 
 OCPP frames carry no site information — a *site* is an operator grouping of
-stations, external metadata. We thread an optional ``station_id -> site_id`` map
+chargers, external metadata. We thread an optional ``charger_id -> site_id`` map
 through the derived layer so fleet rollups can later aggregate per site. With no
 map, ``site_id`` is simply ``None`` everywhere (the iteration-one default).
 
@@ -23,6 +23,6 @@ if _env:
         _DEFAULT_MAP = {}
 
 
-def site_for(station_id: str, mapping: dict[str, str] | None = None) -> str | None:
-    """Return the site for a station, or ``None`` if unmapped."""
-    return (mapping if mapping is not None else _DEFAULT_MAP).get(station_id)
+def site_for(charger_id: str, mapping: dict[str, str] | None = None) -> str | None:
+    """Return the site for a charger, or ``None`` if unmapped."""
+    return (mapping if mapping is not None else _DEFAULT_MAP).get(charger_id)

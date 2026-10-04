@@ -26,8 +26,8 @@ from .parsing import (
 from .pg import CREATE_TABLE_SQL, init_schema, write_raw_event, write_raw_events
 from .readers import (
     read_archive_ducklake,
-    read_latest_metervalues_per_station_postgres,
-    read_latest_per_station_postgres,
+    read_latest_metervalues_per_charger_postgres,
+    read_latest_per_charger_postgres,
     read_recent_window_postgres,
 )
 from .sessionization import (
@@ -71,8 +71,8 @@ __all__ = [
     "SESSIONS_TABLE",
     "READINGS_TABLE",
     "ANALYTICS_TABLE",
-    "read_latest_per_station_postgres",
-    "read_latest_metervalues_per_station_postgres",
+    "read_latest_per_charger_postgres",
+    "read_latest_metervalues_per_charger_postgres",
     "CREATE_TABLE_SQL",
     "init_schema",
     "write_raw_event",

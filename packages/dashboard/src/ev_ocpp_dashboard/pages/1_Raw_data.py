@@ -28,7 +28,7 @@ n = st.sidebar.slider("Rows to show", min_value=5, max_value=500, value=50, step
 def _raw_rows(limit: int) -> pl.DataFrame:
     # payload cast to text so ConnectorX returns a readable string column.
     query = (
-        "SELECT event_id, station_id, msg_type, unique_id, action, "
+        "SELECT event_id, charger_id, msg_type, unique_id, action, "
         f"payload::text AS payload, ingest_ts FROM raw_events ORDER BY event_id DESC LIMIT {limit}"
     )
     return pl.read_database_uri(query, PG_URI, engine="connectorx")

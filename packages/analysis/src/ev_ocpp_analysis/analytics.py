@@ -1,10 +1,10 @@
 """Daily per-charger analytics derived from gold sessions + raw events.
 
 ``compute_daily_stats`` rolls charging sessions up to one row per
-``(station_id, day)`` and joins in a fault count from the raw ``StatusNotification``
+``(charger_id, day)`` and joins in a fault count from the raw ``StatusNotification``
 frames (a fault is any StatusNotification whose ``errorCode`` is not ``NoError``).
 
-Columns per (station_id, day):
+Columns per (charger_id, day):
 - ``session_count``       — sessions started that day
 - ``total_energy_kwh``    — energy delivered that day
 - ``avg_power`` / ``peak_power``
@@ -23,7 +23,7 @@ import polars as pl
 from .sites import site_for
 
 DAILY_COLUMNS = (
-    "station_id",
+    "charger_id",
     "site_id",
     "day",
     "session_count",
@@ -38,12 +38,12 @@ _SECONDS_PER_DAY = 86400.0
 
 
 def _fault_counts(raw_events: pl.DataFrame) -> pl.DataFrame:
-    """Per (station_id, day) count of StatusNotification faults from raw events.
+    """Per (charger_id, day) count of StatusNotification faults from raw events.
 
     A fault is a StatusNotification Call whose payload ``errorCode`` is not
     ``NoError``. The day comes from the payload timestamp.
     """
-    empty = pl.DataFrame(schema={"station_id": pl.Utf8, "day": pl.Date, "fault_count": pl.UInt32})
+    empty = pl.DataFrame(schema={"charger_id": pl.Utf8, "day": pl.Date, "fault_count": pl.UInt32})
     if raw_events.is_empty():
         return empty
     sn = raw_events.filter(pl.col("action") == "StatusNotification")
@@ -64,12 +64,12 @@ def _fault_counts(raw_events: pl.DataFrame) -> pl.DataFrame:
             except ValueError:
                 day = None
         if day is not None:
-            rows.append({"station_id": r["station_id"], "day": day})
+            rows.append({"charger_id": r["charger_id"], "day": day})
     if not rows:
         return empty
     return (
-        pl.DataFrame(rows, schema={"station_id": pl.Utf8, "day": pl.Date})
-        .group_by("station_id", "day")
+        pl.DataFrame(rows, schema={"charger_id": pl.Utf8, "day": pl.Date})
+        .group_by("charger_id", "day")
         .agg(pl.len().cast(pl.UInt32).alias("fault_count"))
     )
 
@@ -83,7 +83,7 @@ def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.
         if faults.is_empty():
             return pl.DataFrame(schema=dict.fromkeys(DAILY_COLUMNS, pl.Null))
         return faults.with_columns(
-            pl.col("station_id").map_elements(site_for, return_dtype=pl.Utf8).alias("site_id"),
+            pl.col("charger_id").map_elements(site_for, return_dtype=pl.Utf8).alias("site_id"),
             pl.lit(0).alias("session_count"),
             pl.lit(0.0).alias("total_energy_kwh"),
             pl.lit(0.0).alias("avg_power"),
@@ -95,7 +95,7 @@ def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.
     has_site = "site_id" in sessions.columns
     daily = (
         sessions.with_columns(pl.col("start_time").dt.date().alias("day"))
-        .group_by("station_id", "day")
+        .group_by("charger_id", "day")
         .agg(
             (pl.col("site_id").first() if has_site else pl.lit(None)).alias("site_id"),
             pl.len().cast(pl.UInt32).alias("session_count"),
@@ -110,14 +110,14 @@ def compute_daily_stats(sessions: pl.DataFrame, raw_events: pl.DataFrame) -> pl.
             .alias("utilization_pct")
         )
     )
-    out = daily.join(faults, on=["station_id", "day"], how="full", coalesce=True).with_columns(
+    out = daily.join(faults, on=["charger_id", "day"], how="full", coalesce=True).with_columns(
         pl.col("fault_count").fill_null(0),
         pl.col("session_count").fill_null(0),
         pl.col("total_energy_kwh").fill_null(0.0),
         pl.col("utilization_pct").fill_null(0.0),
         # Fault-only days (no session) have no site_id from the left side.
         pl.col("site_id").fill_null(
-            pl.col("station_id").map_elements(site_for, return_dtype=pl.Utf8)
+            pl.col("charger_id").map_elements(site_for, return_dtype=pl.Utf8)
         ),
     )
-    return out.select(DAILY_COLUMNS).sort("day", "station_id")
+    return out.select(DAILY_COLUMNS).sort("day", "charger_id")

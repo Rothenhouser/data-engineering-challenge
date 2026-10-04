@@ -4,10 +4,10 @@ Reads two stores through the shared library:
 - Postgres (hot landing) for the live status snapshot and the in-flight session
   view, the latter reusing the shared ``reconstruct_sessions`` fold over a
   bounded recent window (Requirements 8.1-8.4, 7.4).
-- DuckLake gold for completed-session history and per-station / per-day fleet
+- DuckLake gold for completed-session history and per-charger / per-day fleet
   rollups computed on the fly in Polars (Requirement 8.5).
 
-Time-range and station filters apply across the views (Requirements 8.6, 8.7).
+Time-range and charger filters apply across the views (Requirements 8.6, 8.7).
 """
 
 from __future__ import annotations
@@ -86,12 +86,12 @@ def _sim_now(events: pl.DataFrame) -> datetime:
 
 
 def _latest_readings(events: pl.DataFrame) -> pl.DataFrame:
-    """Latest Power.Active.Import, SoC and last-seen time per station."""
+    """Latest Power.Active.Import, SoC and last-seen time per charger."""
     rows = events.sort("ingest_ts").to_dicts()
     latest: dict[str, dict] = {}
-    for r in rows:  # ascending time, so the last write per station wins
-        sid = r["station_id"]
-        cur = latest.setdefault(sid, {"station_id": sid, "power_kw": None, "soc_pct": None})
+    for r in rows:  # ascending time, so the last write per charger wins
+        sid = r["charger_id"]
+        cur = latest.setdefault(sid, {"charger_id": sid, "power_kw": None, "soc_pct": None})
         cur["last_seen"] = r["ingest_ts"]
         if r.get("action") == "MeterValues":
             payload = r["payload"] if isinstance(r["payload"], dict) else {}
@@ -121,7 +121,7 @@ def _charger_overview(window_minutes: int) -> pl.DataFrame:
     sessions = reconstruct_sessions(events, now=now)
     active = (
         sessions.filter(pl.col("status") == "active").select(
-            "station_id",
+            "charger_id",
             pl.lit(True).alias("in_session"),
             pl.col("start_time").alias("session_start"),
             pl.col("total_energy_kwh").round(2).alias("energy_kwh_so_far"),
@@ -129,7 +129,7 @@ def _charger_overview(window_minutes: int) -> pl.DataFrame:
         if not sessions.is_empty()
         else pl.DataFrame(
             schema={
-                "station_id": pl.Utf8,
+                "charger_id": pl.Utf8,
                 "in_session": pl.Boolean,
                 "session_start": pl.Datetime(time_zone="UTC"),
                 "energy_kwh_so_far": pl.Float64,
@@ -137,7 +137,7 @@ def _charger_overview(window_minutes: int) -> pl.DataFrame:
         )
     )
     overview = (
-        readings.join(active, on="station_id", how="left")
+        readings.join(active, on="charger_id", how="left")
         .with_columns(pl.col("in_session").fill_null(False))  # noqa: FBT003
         .with_columns(
             # Power and SoC are transaction-time readings — only meaningful while
@@ -159,14 +159,14 @@ def _charger_overview(window_minutes: int) -> pl.DataFrame:
             .alias("session_minutes")
         )
     return overview.select(
-        "station_id",
+        "charger_id",
         "in_session",
         "current_power_kw",
         "energy_kwh_so_far",
         "session_minutes",
         "soc_pct",
         "last_seen",
-    ).sort("station_id")
+    ).sort("charger_id")
 
 
 @st.cache_data(ttl=30)
@@ -174,11 +174,11 @@ def _gold_sessions() -> pl.DataFrame:
     return read_gold_table(LAKE_CATALOG, LAKE_DATA, SESSIONS_TABLE)
 
 
-def _apply_filters(df: pl.DataFrame, stations: list[str], start, end, ts_col: str) -> pl.DataFrame:
+def _apply_filters(df: pl.DataFrame, chargers: list[str], start, end, ts_col: str) -> pl.DataFrame:
     if df.is_empty():
         return df
-    if stations:
-        df = df.filter(pl.col("station_id").is_in(stations))
+    if chargers:
+        df = df.filter(pl.col("charger_id").is_in(chargers))
     if ts_col in df.columns:
         # Normalize the column to UTC-aware before comparing with the tz-aware
         # bounds, whatever tz it carries: a naive column is interpreted as UTC;
@@ -205,13 +205,13 @@ def main() -> None:
     overview = _charger_overview(WINDOW_MINUTES)
 
     # --- filters (apply across views) --------------------------------------
-    stations = sorted(
-        set(gold["station_id"].to_list() if not gold.is_empty() else [])
-        | set(overview["station_id"].to_list() if not overview.is_empty() else [])
+    chargers = sorted(
+        set(gold["charger_id"].to_list() if not gold.is_empty() else [])
+        | set(overview["charger_id"].to_list() if not overview.is_empty() else [])
     )
     with st.sidebar:
         st.header("Filters")
-        picked = st.multiselect("Station", stations)
+        picked = st.multiselect("Charger", chargers)
         today = datetime.now(UTC).date()
         start = st.date_input("From", today - timedelta(days=7))
         end = st.date_input("To", today)
@@ -226,7 +226,7 @@ def main() -> None:
 
     gold_f = _apply_filters(gold, picked, start, end, "start_time")
     if picked and not overview.is_empty():
-        overview = overview.filter(pl.col("station_id").is_in(picked))
+        overview = overview.filter(pl.col("charger_id").is_in(picked))
 
     # --- per-charger live overview -----------------------------------------
     st.subheader(f"Charger overview (last {WINDOW_MINUTES} min)")
@@ -258,15 +258,15 @@ def main() -> None:
         return
     st.dataframe(gold_f, width="stretch")
 
-    per_station = (
-        gold_f.group_by("station_id")
+    per_charger = (
+        gold_f.group_by("charger_id")
         .agg(
             pl.len().alias("sessions"),
             pl.col("total_energy_kwh").sum().round(2).alias("energy_kwh"),
             pl.col("avg_power").mean().round(2).alias("avg_power"),
             pl.col("peak_power").max().alias("peak_power"),
         )
-        .sort("station_id")
+        .sort("charger_id")
     )
     per_day = (
         gold_f.with_columns(pl.col("start_time").dt.date().alias("day"))
@@ -279,8 +279,8 @@ def main() -> None:
     )
     col1, col2 = st.columns(2)
     with col1:
-        st.caption("Per station")
-        st.dataframe(per_station, width="stretch")
+        st.caption("Per charger")
+        st.dataframe(per_charger, width="stretch")
     with col2:
         st.caption("Per day")
         st.dataframe(per_day, width="stretch")

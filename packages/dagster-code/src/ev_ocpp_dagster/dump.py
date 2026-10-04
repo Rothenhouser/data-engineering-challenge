@@ -57,7 +57,7 @@ def raw_events_archive(context: AssetExecutionContext) -> None:
             watermark = 0
 
         query = (
-            "SELECT event_id, station_id, msg_type, unique_id, action, "
+            "SELECT event_id, charger_id, msg_type, unique_id, action, "
             f"payload::text AS payload, ingest_ts FROM raw_events WHERE event_id > {watermark} "
             "ORDER BY event_id"
         )

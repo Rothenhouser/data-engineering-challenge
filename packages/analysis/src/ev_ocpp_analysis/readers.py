@@ -3,7 +3,7 @@
 The two sources differ only in how rows are fetched; the shared
 ``reconstruct_sessions`` fold is identical (Requirement 7). Both readers return a
 frame carrying the RawEvent columns the fold expects
-(``station_id, msg_type, unique_id, action, payload, ingest_ts``), so
+(``charger_id, msg_type, unique_id, action, payload, ingest_ts``), so
 "fetch -> fold" is one import.
 
 - Historical: DuckDB reads the immutable cold DuckLake archive table (Requirement 7.3).
@@ -35,14 +35,14 @@ def read_archive_duckdb(parquet_glob: str, predicate: str | None = None) -> pl.D
     """Read raw events from the Parquet archive via a DuckDB scan.
 
     ``predicate`` is an optional SQL WHERE clause (without the keyword) for
-    predicate pushdown, e.g. ``"station_id = 'charger1'"``. Returns a frame with
+    predicate pushdown, e.g. ``"charger_id = 'charger1'"``. Returns a frame with
     the RawEvent columns, with ``payload`` decoded to dicts.
     """
     import duckdb
 
     where = f" WHERE {predicate}" if predicate else ""
     sql = (
-        "SELECT station_id, msg_type, unique_id, action, payload, ingest_ts "
+        "SELECT charger_id, msg_type, unique_id, action, payload, ingest_ts "
         f"FROM read_parquet(?){where} ORDER BY event_id"
     )
     con = duckdb.connect()
@@ -64,12 +64,12 @@ def read_archive_ducklake(
     Attaches the DuckLake catalog and selects the RawEvent columns from
     ``lake.main.raw_events_archive``, handing Polars a frame via ``.pl()``.
     ``predicate`` is an optional SQL WHERE clause (without the keyword) for
-    pushdown, e.g. ``"station_id = 'charger1'"``. ``payload`` is decoded to dicts
+    pushdown, e.g. ``"charger_id = 'charger1'"``. ``payload`` is decoded to dicts
     for the fold. Returns an empty frame if the table does not yet exist.
     """
     where = f" WHERE {predicate}" if predicate else ""
     sql = (
-        "SELECT station_id, msg_type, unique_id, action, payload, ingest_ts "
+        "SELECT charger_id, msg_type, unique_id, action, payload, ingest_ts "
         f"FROM {ARCHIVE_TABLE}{where} ORDER BY event_id"
     )
     with connect(catalog_path, data_path) as con:
@@ -89,7 +89,7 @@ def read_recent_window_postgres(conn_uri: str, since: datetime) -> pl.DataFrame:
     reconstruction. ``payload`` is decoded to dicts for the fold.
     """
     query = (
-        "SELECT station_id, msg_type, unique_id, action, payload::text AS payload, "
+        "SELECT charger_id, msg_type, unique_id, action, payload::text AS payload, "
         f"ingest_ts FROM raw_events WHERE ingest_ts >= '{since.isoformat()}' "
         "ORDER BY event_id"
     )
@@ -97,32 +97,32 @@ def read_recent_window_postgres(conn_uri: str, since: datetime) -> pl.DataFrame:
     return _parse_payloads(df)
 
 
-def read_latest_per_station_postgres(conn_uri: str) -> pl.DataFrame:
-    """Read the latest RawEvent per ``station_id`` for the live status view.
+def read_latest_per_charger_postgres(conn_uri: str) -> pl.DataFrame:
+    """Read the latest RawEvent per ``charger_id`` for the live status view.
 
     Powers the dashboard's cheap latest-per-charger snapshot without running the
     fold (Requirement 8.1). ``payload`` is decoded to dicts.
     """
     query = (
-        "SELECT DISTINCT ON (station_id) station_id, msg_type, unique_id, action, "
+        "SELECT DISTINCT ON (charger_id) charger_id, msg_type, unique_id, action, "
         "payload::text AS payload, ingest_ts FROM raw_events "
-        "ORDER BY station_id, event_id DESC"
+        "ORDER BY charger_id, event_id DESC"
     )
     df = pl.read_database_uri(query, conn_uri, engine="connectorx")
     return _parse_payloads(df)
 
 
-def read_latest_metervalues_per_station_postgres(conn_uri: str) -> pl.DataFrame:
-    """Read the latest MeterValues RawEvent per ``station_id``.
+def read_latest_metervalues_per_charger_postgres(conn_uri: str) -> pl.DataFrame:
+    """Read the latest MeterValues RawEvent per ``charger_id``.
 
-    The newest event per station is usually a Heartbeat/ack with no readings;
+    The newest event per charger is usually a Heartbeat/ack with no readings;
     power and SoC only live in MeterValues payloads, so the live status view
     pulls the latest MeterValues separately for its measurand columns.
     """
     query = (
-        "SELECT DISTINCT ON (station_id) station_id, payload::text AS payload, ingest_ts "
+        "SELECT DISTINCT ON (charger_id) charger_id, payload::text AS payload, ingest_ts "
         "FROM raw_events WHERE action = 'MeterValues' "
-        "ORDER BY station_id, event_id DESC"
+        "ORDER BY charger_id, event_id DESC"
     )
     df = pl.read_database_uri(query, conn_uri, engine="connectorx")
     return _parse_payloads(df)

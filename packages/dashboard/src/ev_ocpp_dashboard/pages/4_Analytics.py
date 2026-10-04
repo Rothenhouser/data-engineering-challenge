@@ -1,6 +1,6 @@
 """Fifth page: fleet analytics from the daily gold table.
 
-Reads the ``gold_analytics_daily`` DuckLake table (one row per station per day,
+Reads the ``gold_analytics_daily`` DuckLake table (one row per charger per day,
 produced by the Dagster analytics job) and offers:
 - rank chargers by total energy sold over a chosen day or month,
 - a utilization overview (% of time each charger was in a session),
@@ -32,7 +32,7 @@ if daily.is_empty():
 
 daily = daily.with_columns(pl.col("day").cast(pl.Date))
 min_day, max_day = daily["day"].min(), daily["day"].max()
-st.caption(f"Data spans {min_day} → {max_day} across {daily['station_id'].n_unique()} chargers.")
+st.caption(f"Data spans {min_day} → {max_day} across {daily['charger_id'].n_unique()} chargers.")
 
 # --- energy ranking (per day or per month) ---------------------------------
 st.subheader("Energy sold — charger ranking")
@@ -55,7 +55,7 @@ else:
     label = pick
 
 ranking = (
-    scoped.group_by("station_id")
+    scoped.group_by("charger_id")
     .agg(
         pl.col("total_energy_kwh").sum().round(2).alias("energy_kwh"),
         pl.col("session_count").sum().alias("sessions"),
@@ -67,29 +67,29 @@ if ranking.is_empty():
     st.info(f"No data for {label}.")
 else:
     st.caption(f"Total energy sold per charger — {label}")
-    st.bar_chart(ranking, x="station_id", y="energy_kwh")
+    st.bar_chart(ranking, x="charger_id", y="energy_kwh")
     st.dataframe(ranking, width="stretch")
 
 # --- utilization overview ---------------------------------------------------
 st.subheader("Utilization — share of time in a session")
 util = (
-    daily.group_by("station_id")
+    daily.group_by("charger_id")
     .agg(pl.col("utilization_pct").mean().round(2).alias("avg_utilization_pct"))
     .sort("avg_utilization_pct", descending=True)
 )
 st.caption("Average daily utilization per charger (% of the day in a session)")
-st.bar_chart(util, x="station_id", y="avg_utilization_pct")
+st.bar_chart(util, x="charger_id", y="avg_utilization_pct")
 
 # --- faults -----------------------------------------------------------------
 st.subheader("Faults per charger")
 faults = (
-    daily.group_by("station_id")
+    daily.group_by("charger_id")
     .agg(pl.col("fault_count").sum().alias("total_faults"))
     .sort("total_faults", descending=True)
 )
 c1, c2 = st.columns([2, 1])
 with c1:
-    st.bar_chart(faults, x="station_id", y="total_faults")
+    st.bar_chart(faults, x="charger_id", y="total_faults")
 with c2:
     st.metric("Fleet total faults", int(faults["total_faults"].sum()))
     st.dataframe(faults, width="stretch")

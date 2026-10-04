@@ -22,7 +22,9 @@ in-process (no service), on the local filesystem (no object store), under
 `data/lake/`.
 
 - **Shared library** (`ev_ocpp_analysis`): OCPP parsing + one Polars
-  `reconstruct_sessions` fold that powers both live and historical views.
+  `reconstruct_sessions` fold that powers both live and historical views. Our
+  schema calls each unit a charger (OCPP: charge point), identified by
+  `charger_id`; a charger may expose several connectors.
 - **Postgres** `raw_events`: durable, append-only landing zone (psycopg, no ORM).
 - **Dagster jobs**: dump-to-DuckLake (archive), session reconstruction (gold
   sessions + per-session readings), daily analytics (energy / utilization / faults).
@@ -63,7 +65,7 @@ Local dashboard dev (hot reload) against the containerized Postgres:
 - **Live clock**: the feed replays historical timestamps, so live views derive
   "now" from the newest payload time (toggleable on the Simulation page).
 - **Sites**: sessions and daily analytics carry a nullable `site_id`, populated
-  from an optional `station_id -> site_id` map (`OCPP_SITE_MAP` env, JSON); unset
+  from an optional `charger_id -> site_id` map (`OCPP_SITE_MAP` env, JSON); unset
   means `None`. Ready for multi-site rollups.
 - **Tests**: property-based tests (hypothesis) cover the fold's correctness
   properties — duplicate tolerance, energy derivation, status totality, and
