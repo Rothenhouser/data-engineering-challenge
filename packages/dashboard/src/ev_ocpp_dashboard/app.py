@@ -211,7 +211,6 @@ def main() -> None:
             # keep it cheap, so live views stay current without manual reload.
             st_autorefresh(interval=every * 1000, key="auto_refresh")
 
-    gold_f = _apply_filters(gold, picked, start, end, "start_time")
     if picked and not overview.is_empty():
         overview = overview.filter(pl.col("charger_id").is_in(picked))
 
@@ -237,5 +236,6 @@ def main() -> None:
             ),
             width="stretch",
         )
+
 
 main()
