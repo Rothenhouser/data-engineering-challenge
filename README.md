@@ -33,6 +33,37 @@ in-process (no service), on the local filesystem (no object store), under
 - All business logic is Polars; the only SQL is parameterized inserts, ConnectorX
   live reads, and DuckLake ATTACH / CREATE / INSERT / SELECT.
 
+## Sessionization
+
+One shared Polars fold (`reconstruct_sessions`) rebuilds charging sessions from
+raw OCPP events, so a session reconstructed live matches the same session
+reconstructed from the archive. It is an ordered, stateful fold (not a GROUP BY)
+because the session key only exists once the opening `StartTransaction` arrives.
+
+- **Order**: events are deduplicated (content-identical frames collapsed, so
+  replays never double-count). Session boundary and reading times come from the
+  payload timestamp when present; the *processing order* of the fold is arrival
+  order (`ingest_ts`, then original row index as a stable tiebreak) so a Call and
+  its CallResult stay adjacent — the OCPP correlation below depends on it.
+- **Lifecycle**: `StartTransaction` opens a session; `MeterValues` accumulate
+  power/SoC/register samples while open; `StopTransaction` closes it. A session
+  is keyed by `charger_id + connector_id + start_time`. Because a Stop carries a
+  `transactionId` but no connector, the fold threads `unique_id -> connector`
+  (from the Start CallResult) and `transactionId -> connector` maps to re-link it.
+- **Parallel sessions**: a charger (OCPP: charge point) has one or more
+  connectors, so a single charger can run concurrent transactions. The fold holds
+  one open session per `(charger_id, connector_id)`, so sessions on different
+  connectors of the same charger reconstruct independently and in parallel.
+- **Energy**: meter register delta (`Energy.Active.Import.Register` last − first),
+  falling back to `avg(power) × duration` when no register readings exist.
+- **Status**: every session is exactly one of `completed` (saw a Stop), `active`
+  (still open, within the recent window), or `incomplete` (still open, older).
+  Duration is null until a Stop closes the session.
+- **Output**: session facts plus a per-session readings frame (the charging
+  curve, one row per `MeterValues`, carrying `charger_id`, `connector_id`,
+  timestamp, power/SoC/register), each reading linked by `session_id`. Daily
+  analytics then roll sessions up per `(charger_id, connector_id, day)`.
+
 ## Run it
 
 ```bash

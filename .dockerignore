@@ -11,3 +11,9 @@ data/duckdb/
 dagster_home/
 _run.*
 *.log
+
+data/*.txt
+
+.ruff_cache
+
+.hypothesis
